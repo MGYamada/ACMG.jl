@@ -26,10 +26,6 @@ function load_sl2reps()
     GAP.Globals.LoadPackage(GapObj("SL2Reps"))
 end
 
-function sl2_irreps(N::Int)
-    GAP.evalstr("SL2IrrepsOfLevel($N)")
-end
-
 function gap_to_oscar_matrix(gap_mat, r)
     # Step 1: 全成分の conductor の lcm
     cond = 1
@@ -234,26 +230,32 @@ end
 #  Main
 # ============================================================
 
-function classify_mtc(N::Int; num_primes::Int=5)
+function classify_mtc(N::Int; max_rank::Int=6, num_primes::Int=5)
     println("MTC Classification: N = $N")
     primes = good_primes(N, num_primes)
     println("Good primes (p ≡ 1 mod $N): $primes")
 
-    # SL2Reps
-    irreps = sl2_irreps(N)
+    # TODO: Haargerup
+    all_irreps = []
+    for d in divisors(N)
+        reps = GAP.evalstr("SL2IrrepsOfLevel($d)")
+        len = Int(GAP.Globals.Length(reps))
+        for i in 1:len
+            push!(all_irreps, (reps[i], d))
+        end
+    end
 
     # Verlinde
-    for (idx, rep) in enumerate(irreps)
+    for (rep, lev) in all_irreps
         r = Int(rep.degree)
+        r > max_rank && continue
+
         S, K, cond = gap_to_oscar_matrix(rep.S, r)
         S_fixed, signs = fix_quantum_dims(S, K, r, cond)
         Nijk = verlinde_float(S_fixed, r, K, cond)
-        if Nijk === nothing
-            println("irrep $idx: degree=$r — not valid (non-integer Verlinde)")
-        elseif all(Nijk .>= 0)
-            println("irrep $idx: degree=$r — VALID fusion rules ✓")
-        else
-            println("irrep $idx: degree=$r — not valid (negative coefficients)")
+
+        if Nijk !== nothing && all(Nijk .>= 0)
+            println("VALID: degree=$r, level=$lev ✓")
         end
     end
 
