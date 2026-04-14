@@ -36,10 +36,10 @@ function gap_to_oscar_matrix(gap_mat, r)
     for i in 1:r, j in 1:r
         cond = lcm(cond, Int(GAP.Globals.Conductor(gap_mat[i,j])))
     end
-    
+
     K, z = cyclotomic_field(cond)
     M = zero_matrix(K, r, r)
-    
+
     for i in 1:r, j in 1:r
         # GAP 側で直接 cond に統一して係数を取る
         coeffs = GAP.Globals.CoeffsCyc(gap_mat[i,j], cond)
@@ -53,13 +53,13 @@ function gap_to_oscar_matrix(gap_mat, r)
         end
         M[i,j] = val
     end
-    
+
     return M, K, cond
 end
 
 function fix_quantum_dims(S, K, r, cond)
     z = exp(2π * im / cond)
-    
+
     signs = ones(Int, r)
     for i in 1:r
         d = S[1,i] * inv(S[1,1])
@@ -70,7 +70,7 @@ function fix_quantum_dims(S, K, r, cond)
             signs[i] = -1
         end
     end
-    
+
     S_fixed = copy(S)
     for i in 1:r, j in 1:r
         S_fixed[i,j] = signs[i] * signs[j] * S[i,j]
@@ -78,19 +78,30 @@ function fix_quantum_dims(S, K, r, cond)
     return S_fixed, signs
 end
 
-function verlinde(S, r::Int, K)
-    aut = complex_conjugation(K)
+function verlinde_float(S, r::Int, K, cond)
+    z = exp(2π * im / cond)
+    deg = degree(K)
+
+    S_num = zeros(ComplexF64, r, r)
+    for i in 1:r, j in 1:r
+        val = zero(ComplexF64)
+        for k in 0:deg-1
+            c = coeff(S[i,j], k)
+            val += (Float64(numerator(c)) / Float64(denominator(c))) * z^k
+        end
+        S_num[i,j] = val
+    end
+
     Nijk = zeros(Int, r, r, r)
     for i in 1:r, j in 1:r, k in 1:r
-        val = sum(S[i,l] * S[j,l] * aut(S[k,l]) * inv(S[1,l]) for l in 1:r)
-        # AbsSimpleNumFieldElem → Rational → Int
-        Nijk[i,j,k] = Int(coeff(val, 0))
+        val = sum(S_num[i,l] * S_num[j,l] * conj(S_num[k,l]) / S_num[1,l] for l in 1:r)
+        n = round(Int, real(val))
+        if abs(real(val) - n) > 1e-4 || abs(imag(val)) > 1e-4
+            return nothing  # not valid modular data
+        end
+        Nijk[i,j,k] = n
     end
     Nijk
-end
-
-function is_valid_fusion(Nijk, r)
-    all(Nijk[i,j,k] >= 0 for i in 1:r, j in 1:r, k in 1:r)
 end
 
 # ============================================================
@@ -229,18 +240,21 @@ function classify_mtc(N::Int; num_primes::Int=5)
     println("Good primes (p ≡ 1 mod $N): $primes")
 
     # SL2Reps
-    candidates = sl2_irreps(N)
+    irreps = sl2_irreps(N)
 
     # Verlinde
-    for rep in candidates
-        S_gap, T_gap = rep.S, rep.T
-        r = rep.degree
-        S, K, cond = gap_to_oscar_matrix(S_gap, r)
-        T, = gap_to_oscar_matrix(T_gap, r)
-        S_fixed, _ = fix_quantum_dims(S, K, r, cond)
-        Nijk = verlinde(S_fixed, r, K)
-        is_valid_fusion(Nijk, r) || continue
-        println("Valid fusion rules found for rep of degree $(r).")
+    for (idx, rep) in enumerate(irreps)
+        r = Int(rep.degree)
+        S, K, cond = gap_to_oscar_matrix(rep.S, r)
+        S_fixed, signs = fix_quantum_dims(S, K, r, cond)
+        Nijk = verlinde_float(S_fixed, r, K, cond)
+        if Nijk === nothing
+            println("irrep $idx: degree=$r — not valid (non-integer Verlinde)")
+        elseif all(Nijk .>= 0)
+            println("irrep $idx: degree=$r — VALID fusion rules ✓")
+        else
+            println("irrep $idx: degree=$r — not valid (negative coefficients)")
+        end
     end
 
     # solve_over_Fp
