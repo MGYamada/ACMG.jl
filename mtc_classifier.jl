@@ -4,19 +4,18 @@
 #
 # Algorithm:
 #   Level I:   SL₂(Z/NZ) reps → modular data (S,T)
-#   Level II: Pentagon/hexagon over F_p — linear propagation — CRT
+#   Level II:  Pentagon/hexagon over F_p — Newton's method — CRT
 #
-# Key insight: pentagon with 4 known F-symbols is LINEAR in the 5th.
-#   Non-homogeneous → solve uniquely (ax = b)
-#   Homogeneous     → gauge freedom, fix x = 1
-#   No backtracking needed.
+# Key insight: Pentagon system is square after gauge fixing.
+#   F_p 上の Newton 法で exact に解ける。
 #
 # Usage:
-#   using Oscar
+#   using Oscar, TensorCategories
 #   include("mtc_classifier.jl")
 #   classify_mtc(5)
 
 using Oscar
+using TensorCategories
 
 # ============================================================
 #  Level I: Modular data
@@ -27,7 +26,6 @@ function load_sl2reps()
 end
 
 function gap_to_oscar_matrix(gap_mat, r)
-    # Step 1: 全成分の conductor の lcm
     cond = 1
     for i in 1:r, j in 1:r
         cond = lcm(cond, Int(GAP.Globals.Conductor(gap_mat[i,j])))
@@ -37,7 +35,6 @@ function gap_to_oscar_matrix(gap_mat, r)
     M = zero_matrix(K, r, r)
 
     for i in 1:r, j in 1:r
-        # GAP 側で直接 cond に統一して係数を取る
         coeffs = GAP.Globals.CoeffsCyc(gap_mat[i,j], cond)
         val = zero(K)
         for k in 1:cond
@@ -55,18 +52,15 @@ end
 
 function fix_quantum_dims(S, K, r, cond)
     z = exp(2π * im / cond)
-
     signs = ones(Int, r)
     for i in 1:r
         d = S[1,i] * inv(S[1,1])
-        # AbsSimpleNumFieldElem の多項式係数を取って数値評価
         deg = degree(K)
         val = sum(Float64(coeff(d, k)) * z^k for k in 0:deg-1)
         if real(val) < -1e-10
             signs[i] = -1
         end
     end
-
     S_fixed = copy(S)
     for i in 1:r, j in 1:r
         S_fixed[i,j] = signs[i] * signs[j] * S[i,j]
@@ -93,7 +87,7 @@ function verlinde_float(S, r::Int, K, cond)
         val = sum(S_num[i,l] * S_num[j,l] * conj(S_num[k,l]) / S_num[1,l] for l in 1:r)
         n = round(Int, real(val))
         if abs(real(val) - n) > 1e-4 || abs(imag(val)) > 1e-4
-            return nothing  # not valid modular data
+            return nothing
         end
         Nijk[i,j,k] = n
     end
@@ -101,109 +95,140 @@ function verlinde_float(S, r::Int, K, cond)
 end
 
 # ============================================================
-#  Level II: Pentagon over F_p
+#  Level II: Pentagon solver over F_p
 # ============================================================
 
-function make_system(Nijk::Array{Int,3}, r::Int)
-    values = Dict{NTuple{6,Int}, Int}()
-    free = NTuple{6,Int}[]
-    gauge_used = Set{NTuple{3,Int}}()
+# --- Pentagon equations from TensorCategories.jl ---
 
-    for a in 1:r, b in 1:r, c in 1:r, d in 1:r, e in 1:r, f in 1:r
-        (Nijk[a,b,e]*Nijk[e,c,d]*Nijk[b,c,f]*Nijk[a,f,d] == 0) && continue
-        sext = (a,b,c,d,e,f)
-        if a == 1 || b == 1 || c == 1
-            values[sext] = 1
-        elseif (a,b,e) ∉ gauge_used
-            values[sext] = 1
-            push!(gauge_used, (a,b,e))
-        else
-            push!(free, sext)
-        end
+function get_pentagon_system(Nijk::Array{Int,3}, r::Int)
+    one_vec = zeros(Int, r)
+    one_vec[1] = 1
+    C, eqs = pentagon_equations(Nijk, one_vec)
+    R = parent(eqs[1])
+    n = nvars(R)
+    return R, eqs, n
+end
+
+# --- F_p reduction ---
+
+function to_Fp(f, Rp, p)
+    result = zero(Rp)
+    yp = gens(Rp)
+    for (c, m) in zip(coefficients(f), monomials(f))
+        c_int = mod(Int(numerator(c)) * invmod(Int(denominator(c)), p), p)
+        degs = degrees(m)
+        mono = prod(yp[i]^degs[i] for i in 1:length(degs))
+        result += c_int * mono
     end
-    (values=values, free=free, fusion=Nijk, rank=r)
+    result
 end
 
-# --- TODO: Pentagon evaluator (your convention) ---
-
-function F_get(values, sext, p)
-    # Look up F-symbol value, return mod p
-    mod(get(values, sext, 0), p)
+function system_to_Fp(eqs, R, p)
+    Fp = GF(p)
+    Rp, xp = polynomial_ring(Fp, symbols(R))
+    eqs_Fp = [to_Fp(eq, Rp, p) for eq in eqs]
+    return Rp, xp, eqs_Fp, Fp
 end
 
-function pentagon_eval(a, b, c, d, g, values, Nijk, r, p)
-    # Evaluate pentagon equation for (a,b,c,d,g).
-    # Returns LHS - RHS mod p.
-    #
-    # Pentagon (Turaev convention):
-    #   Σ_h F[a,b,c; g; e,h] * F[a,h,c,d; g; ?,?] * F[b,c,d; ?; h,?]
-    #     = F[b,c,d; g; ?,?] * F[a,?,d; g; ?,?]
-    #
-    # TODO: fill in exact index contraction for your convention
-    0  # placeholder
+# --- Evaluate and differentiate over F_p ---
+
+function eval_poly_Fp(f, vals)
+    result = zero(parent(vals[1]))
+    for (c, m) in zip(coefficients(f), monomials(f))
+        degs = degrees(m)
+        term = c * prod(vals[i]^degs[i] for i in 1:length(degs))
+        result += term
+    end
+    result
 end
 
-# --- Core: Linear propagation ---
+function eval_system_Fp(eqs, vals)
+    [eval_poly_Fp(eq, vals) for eq in eqs]
+end
 
-function solve_over_Fp(system, p::Int)
-    values = Dict{NTuple{6,Int},Int}(k => mod(v,p) for (k,v) in system.values)
-    unsolved = Set(system.free)
-    r = system.rank
-    Nijk = system.fusion
+function jacobian_Fp(eqs, vals, Fp, n)
+    m = length(eqs)
+    J = zero_matrix(Fp, m, n)
+    for i in 1:m, j in 1:n
+        df = derivative(eqs[i], j)
+        J[i,j] = eval_poly_Fp(df, vals)
+    end
+    J
+end
 
-    changed = true
-    while changed
-        changed = false
-        for a in 1:r, b in 1:r, c in 1:r, d in 1:r, g in 1:r
-            result = try_solve_linear(a, b, c, d, g, values, unsolved, Nijk, r, p)
-            if result !== nothing
-                var, val = result
-                values[var] = val
-                delete!(unsolved, var)
-                changed = true
+# --- Newton's method over F_p ---
+
+function newton_solve_Fp(eqs, Fp; max_trials=200, max_iter=50)
+    n = nvars(parent(eqs[1]))
+    p = Int(characteristic(Fp))
+    solutions = Vector{Vector}()
+
+    for trial in 1:max_trials
+        x = [Fp(rand(1:p-1)) for _ in 1:n]
+
+        converged = false
+        for iter in 1:max_iter
+            F_val = eval_system_Fp(eqs, x)
+
+            if all(iszero, F_val)
+                converged = true
+                break
+            end
+
+            J = jacobian_Fp(eqs, x, Fp, n)
+
+            if iszero(det(J))
+                break
+            end
+
+            # Newton step
+            F_col = matrix(Fp, length(F_val), 1, F_val)
+            delta = solve(J, F_col; side=:right)
+            for i in 1:n
+                x[i] = x[i] - delta[i,1]
+            end
+        end
+
+        if converged
+            is_new = all(sol -> any(sol[i] != x[i] for i in 1:n), solutions)
+            if is_new || isempty(solutions)
+                push!(solutions, copy(x))
             end
         end
     end
 
-    # Remaining unsolved = gauge freedom → fix to 1
-    for var in unsolved
-        values[var] = 1
-    end
-
-    # Verify
-    if verify_all(values, Nijk, r, p)
-        return values
-    end
-    nothing
+    return solutions
 end
 
-function try_solve_linear(a, b, c, d, g, values, unsolved, Nijk, r, p)
-    # Evaluate pentagon (a,b,c,d,g). 
-    # If exactly one unknown remains and equation is linear:
-    #   non-homogeneous (coeff ≠ 0) → return (var, solution)
-    #   homogeneous (coeff = 0)     → return nothing (skip)
-    # Otherwise → return nothing
-    #
-    # TODO: implement with your pentagon convention.
-    # This is the ONLY function you need to write carefully.
-    nothing
-end
+# --- Brute force for small systems ---
 
-function verify_all(values, Nijk, r, p)
-    for a in 1:r, b in 1:r, c in 1:r, d in 1:r, g in 1:r
-        if pentagon_eval(a, b, c, d, g, values, Nijk, r, p) % p != 0
-            return false
+function brute_force_Fp(eqs, Fp)
+    n = nvars(parent(eqs[1]))
+    p = Int(characteristic(Fp))
+    solutions = Vector{Vector}()
+
+    if BigInt(p)^n > 10^6
+        println("  WARNING: brute force too large (p^n = $(BigInt(p)^n))")
+        return solutions
+    end
+
+    for vals_int in Iterators.product(ntuple(_ -> 0:p-1, n)...)
+        vals = [Fp(v) for v in vals_int]
+        F_val = eval_system_Fp(eqs, vals)
+        if all(iszero, F_val)
+            push!(solutions, vals)
         end
     end
-    true
+
+    return solutions
 end
 
-# --- Hexagon (linear in R given F) ---
+# --- Hexagon solver ---
 
-function solve_hexagon_Fp(F_values, Nijk, r, p)
+function solve_hexagon_Fp(F_values, Nijk, r, Fp)
     # With F known, hexagon is linear in R. Solve directly.
-    # TODO: implement
-    Dict{NTuple{3,Int}, Int}()
+    # TODO: implement hexagon equations
+    Dict{NTuple{3,Int}, Any}()
 end
 
 # ============================================================
@@ -220,22 +245,19 @@ function good_primes(N::Int, count::Int)
     result
 end
 
-function crt_reconstruct(residues, N)
-    K, zeta = cyclotomic_field(N)
-    # TODO: recover Z[ζ_N] element from F_p images
-    zero(K)
-end
-
 # ============================================================
 #  Main
 # ============================================================
 
-function classify_mtc(N::Int; max_rank::Int=6, num_primes::Int=5)
+function classify_mtc(N::Int; max_rank::Int=20, num_primes::Int=5)
+    println("=" ^ 60)
     println("MTC Classification: N = $N")
+    println("=" ^ 60)
+
     primes = good_primes(N, num_primes)
     println("Good primes (p ≡ 1 mod $N): $primes")
 
-    # TODO: Haargerup
+    # Level I: Enumerate modular data candidates
     all_irreps = []
     for d in divisors(N)
         reps = GAP.evalstr("SL2IrrepsOfLevel($d)")
@@ -245,7 +267,8 @@ function classify_mtc(N::Int; max_rank::Int=6, num_primes::Int=5)
         end
     end
 
-    # Verlinde
+    valid_candidates = []
+
     for (rep, lev) in all_irreps
         r = Int(rep.degree)
         r > max_rank && continue
@@ -256,12 +279,45 @@ function classify_mtc(N::Int; max_rank::Int=6, num_primes::Int=5)
 
         if Nijk !== nothing && all(Nijk .>= 0)
             println("VALID: degree=$r, level=$lev ✓")
+            push!(valid_candidates, (Nijk=Nijk, rank=r, level=lev))
         end
     end
 
-    # solve_over_Fp
+    println("\n$(length(valid_candidates)) candidates found.")
 
-    # CRT
+    # Level II: Solve pentagon over F_p
+    for (idx, cand) in enumerate(valid_candidates)
+        cand.rank == 1 && continue  # Skip pointed categories
+        println("\n--- Candidate $idx: rank=$(cand.rank), level=$(cand.level) ---")
+
+        R, eqs, n = get_pentagon_system(cand.Nijk, cand.rank)
+        println("Pentagon: $n variables, $(length(eqs)) equations")
+
+        if n == 0
+            println("  Pointed category. F = trivial.")
+            continue
+        end
+
+        for p in primes
+            println("  F_$p: ")
+            Rp, xp, eqs_Fp, Fp = system_to_Fp(eqs, R, p)
+
+            if n <= 5 && p <= 31
+                solutions = brute_force_Fp(eqs_Fp, Fp)
+            else
+                solutions = newton_solve_Fp(eqs_Fp, Fp)
+            end
+
+            println("$(length(solutions)) solutions")
+            for (si, sol) in enumerate(solutions)
+                println("    [$si] $sol")
+            end
+        end
+    end
+
+    println("\n" * "=" ^ 60)
+    println("Done. N=$N classified.")
+    println("=" ^ 60)
 end
 
 load_sl2reps()
