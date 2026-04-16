@@ -1,5 +1,5 @@
-# mtc_pipeline_v2.jl
-# Stage 2 revised: fixes two bugs found in first test run.
+# mtc_pipeline_v2.jl  (v3: fixes Yang-Lee + multi-MD from single atomic)
+# Stage 2 revised: fixes three bugs found in test runs.
 #
 # Bug 1: find_signed_V checked T[i,i]^12 = 1, but the correct condition is
 #         that T[i,i] is a (12·ord(T))-th root of unity, or more precisely
@@ -240,14 +240,19 @@ end
 # ============================================================
 
 """
-    find_signed_V(pmd::pMDRep; tol=1e-6) -> Union{MDRep, Nothing}
+    find_signed_V(pmd::pMDRep; tol=1e-6) -> Vector{MDRep}
 
-Revised version that handles:
+Revised version (v3) that handles:
 1. Projective normalization: T[i₀,i₀] need not be 1; we try all rows
    and normalize T by T[i₀,i₀]⁻¹ (choosing α in eq. 3.2).
 2. Odd irreps: S entries may be purely imaginary. We try multiplying S
    by each 4th root of unity (ζ₄^α, α=0,1,2,3) to find a real form.
-   This corresponds to the paper's eq. (3.2): ρ_α(s) = ζ₄^α · S/D.
+3. Returns ALL valid MDReps (not just the first), because the same atomic
+   irrep can yield both Fibonacci (c=14/5) and Yang-Lee (c=-14/5) via
+   different (α, i₀) choices.
+4. S₀₀ sign: the unit row must have all d_i = S[i₀,j]/S[i₀,i₀] > 0,
+   but S[i₀,i₀] itself may be negative (it's 1/D up to a sign from V).
+   We use |S[i₀,i₀]| for the positivity check and flip V globally if needed.
 """
 function find_signed_V(pmd::pMDRep; tol::Real=1e-6)
     r = size(pmd.S, 1)
@@ -256,49 +261,49 @@ function find_signed_V(pmd::pMDRep; tol::Real=1e-6)
     T_raw = pmd.T isa AbstractMatrix{<:Number} ? pmd.T :
             matrix_to_complex(pmd.T, exp(2π*im/pmd.N), degree(pmd.K))
 
-    # Try each projective twist α ∈ {0,1,2,3}:
-    #   S_α = ζ₄^α · S_raw    (paper eq. 3.2: ρ_α(s) = ζ₄^α · S/D)
-    #   T_α = ζ₁₂^α · T_raw   (paper eq. 3.2: ρ_α(t) = ζ₁₂^α · e^{-2πic/24} · T)
-    # The twist makes S real for the right α (even → α=0, odd → α=1 or 3).
+    found = MDRep[]
+    seen_charges = Set{Rational{Int}}()
 
     for α in 0:3
-        ζ4_α = cispi(α / 2)    # e^{iπα/2} = i^α
-        ζ12_α = cispi(α / 6)   # e^{iπα/6}
+        ζ4_α = cispi(α / 2)
+        ζ12_α = cispi(α / 6)
         S_num = ζ4_α * S_raw
         T_num = ζ12_α * T_raw
 
-        # Try each row i₀ as the unit object
         for i0 in 1:r
-            # Normalize T so that T[i₀,i₀] = 1 (determines central charge)
             t_i0 = T_num[i0, i0]
             abs(t_i0) < tol && continue
-            T_norm = T_num / t_i0   # now T_norm[i₀,i₀] = 1
+            T_norm = T_num / t_i0
 
-            # Check: is row i₀ of S_num all-real?
             row_i0 = S_num[i0, :]
-            if any(j -> abs(imag(row_i0[j])) > tol, 1:r)
-                continue
-            end
+            any(j -> abs(imag(row_i0[j])) > tol, 1:r) && continue
 
-            # Determine V: for each j, choose V[j] = ±1 so that S_MD[i₀,j] > 0
+            # Determine V so that d_i = V[i₀]*V[j]*S[i₀,j] / (V[i₀]²*S[i₀,i₀]) > 0
+            # Since V[i₀]² = 1, this is V[j]*S[i₀,j] / S[i₀,i₀] > 0 for sign(S[i₀,i₀]) fixed.
+            # Strategy: pick V to make S_MD[i₀,j] all same sign, then flip globally if negative.
             V = ones(Int, r)
             ok = true
+            target_sign = sign(real(row_i0[i0]))  # sign of the diagonal
+            abs(real(row_i0[i0])) < tol && continue
             for j in 1:r
                 re = real(row_i0[j])
-                if abs(re) < tol
-                    ok = false; break
-                end
-                V[j] = re > 0 ? 1 : -1
+                abs(re) < tol && (ok = false; break)
+                # We want V[j] * re to have the same sign as target_sign
+                V[j] = sign(re) == target_sign ? 1 : -1
             end
             ok || continue
 
-            # Apply V to entire S
-            S_MD = copy(S_num)
-            for i in 1:r, j in 1:r
-                S_MD[i, j] = V[i] * V[j] * S_num[i, j]
+            # Apply V
+            S_MD = [V[i] * V[j] * S_num[i, j] for i in 1:r, j in 1:r]
+
+            # Now S_MD[i₀, :] should all have the same sign = target_sign
+            # If target_sign < 0, flip all V (global sign doesn't matter for V*S*V)
+            if target_sign < 0
+                S_MD = -S_MD  # equivalent to flipping one extra global sign
+                V = -V
             end
 
-            # Check all d_i = S_MD[i₀,j] / S_MD[i₀,i₀] are real and positive
+            # Verify d_i > 0
             S00 = real(S_MD[i0, i0])
             S00 < tol && continue
             dims_ok = true
@@ -310,7 +315,7 @@ function find_signed_V(pmd::pMDRep; tol::Real=1e-6)
             end
             dims_ok || continue
 
-            # Check S_MD is approximately real-symmetric
+            # Check real-symmetric
             real_sym = true
             for i in 1:r, j in i:r
                 if abs(imag(S_MD[i, j])) > tol
@@ -322,12 +327,12 @@ function find_signed_V(pmd::pMDRep; tol::Real=1e-6)
             end
             real_sym || continue
 
-            # Reorder so that unit object is index 1
+            # Reorder: unit object → index 1
             perm_unit = vcat([i0], setdiff(1:r, [i0]))
             S_reord = S_MD[perm_unit, perm_unit]
             T_reord = Diagonal([T_norm[perm_unit[i], perm_unit[i]] for i in 1:r])
 
-            # Verlinde check
+            # Verlinde
             Nijk = zeros(Int, r, r, r)
             verlinde_ok = true
             for i in 1:r, j in 1:r, k in 1:r
@@ -348,12 +353,16 @@ function find_signed_V(pmd::pMDRep; tol::Real=1e-6)
             c_over_8 = angle(p_plus / D) / (2π)
             c_rational = rationalize(c_over_8 * 8; tol=1e-4)
 
-            return MDRep(pmd, V[perm_unit], S_reord, T_reord, Nijk,
-                         c_rational, pmd.K, pmd.N)
+            # Deduplicate by central charge (same c from different (α,i₀) is redundant)
+            c_rational in seen_charges && continue
+            push!(seen_charges, c_rational)
+
+            push!(found, MDRep(pmd, V[perm_unit], S_reord, T_reord, Nijk,
+                               c_rational, pmd.K, pmd.N))
         end
     end
 
-    return nothing
+    return found
 end
 
 # ============================================================
@@ -383,8 +392,8 @@ function classify_modular_data(N::Int; max_rank::Int=6, verbose::Bool=true)
 
         found = false
         for p in pmds
-            md = find_signed_V(p)
-            if md !== nothing
+            mds = find_signed_V(p)
+            for md in mds
                 push!(results, md)
                 found = true
                 if verbose
@@ -407,5 +416,5 @@ function classify_modular_data(N::Int; max_rank::Int=6, verbose::Bool=true)
     return results
 end
 
-println("mtc_pipeline_v2.jl loaded.")
+println("mtc_pipeline_v2.jl (v3) loaded.")
 println("Usage: results = classify_modular_data(5; max_rank=4)")
