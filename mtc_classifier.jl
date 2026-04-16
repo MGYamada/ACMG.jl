@@ -174,6 +174,75 @@ function fix_quantum_dims_float(S_num::Matrix{ComplexF64}, r::Int)
     return S_fixed, signs
 end
 
+# --- Admissibility checks (BNRW 2016) ---
+
+function check_ST_relation(S::Matrix{ComplexF64}, T::Matrix{ComplexF64}, r::Int; tol=1e-4)
+    """For projective SL₂(Z) representation from SL2Reps: (ST)³ = S²"""
+    ST3 = (S * T)^3
+    S2 = S^2
+    diff1 = ST3 - S2
+    diff2 = ST3 + S2  # 符号の不定性
+    return min(maximum(abs.(diff1)), maximum(abs.(diff2))) < tol
+end
+
+function check_cauchy(S::Matrix{ComplexF64}, N::Int, r::Int; tol=1e-4)
+    """Cauchy theorem: prime factors of D² ⊆ prime factors of N."""
+    d = [real(S[1,i] / S[1,1]) for i in 1:r]
+    D_sq = sum(x^2 for x in d)
+    N_primes = Set(Int(p) for (p, _) in factor(N))
+
+    # Try D² ≈ integer / small denominator
+    for mult in 1:60
+        x = D_sq * mult
+        x_rounded = round(Int, x)
+        if abs(x - x_rounded) < tol * max(abs(x), 1.0) && x_rounded != 0
+            # D² = x_rounded / mult (but mult divides N's primes typically)
+            num_primes = x_rounded == 0 ? Set{Int}() : Set(Int(p) for (p, _) in factor(abs(x_rounded)))
+            den_primes = mult == 1 ? Set{Int}() : Set(Int(p) for (p, _) in factor(mult))
+            return issubset(union(num_primes, den_primes), N_primes)
+        end
+    end
+    # Couldn't identify D² as rational; accept by default
+    return true
+end
+
+function check_frobenius_schur(S::Matrix{ComplexF64}, T::Matrix{ComplexF64}, r::Int; tol=1e-3)
+    """ν_2(X) must be integer-valued. ν_2(1) = 1."""
+    d = [real(S[1,i] / S[1,1]) for i in 1:r]
+    D_sq = sum(x^2 for x in d)
+    theta = [T[i,i] for i in 1:r]
+
+    # Verlinde fusion coefficients (complex)
+    N_vl = zeros(ComplexF64, r, r, r)
+    for i in 1:r, j in 1:r, k in 1:r
+        N_vl[i,j,k] = sum(S[i,l] * S[j,l] * conj(S[k,l]) / S[1,l] for l in 1:r)
+    end
+
+    for X in 1:r
+        nu_2 = sum(N_vl[X,X,Y] * d[Y] * theta[Y]^2 for Y in 1:r) / D_sq
+        nu_2_int = round(Int, real(nu_2))
+        if abs(imag(nu_2)) > tol || abs(real(nu_2) - nu_2_int) > tol
+            return false
+        end
+        if abs(nu_2_int) > r
+            return false
+        end
+        # Unit object: ν_2(1) must equal 1
+        if X == 1 && nu_2_int != 1
+            return false
+        end
+    end
+    return true
+end
+
+function admissibility_check(S, T, N, r)
+    if !check_ST_relation(S, T, r)
+        return false, "(ST)³ ≠ ±S²"
+    end
+    # Cauchy check, FS-indicator は保留（代数的整数の扱いが必要）
+    return true, "OK"
+end
+
 # --- Level I main: enumerate all modular data candidates ---
 
 function enumerate_modular_data(N::Int; max_rank::Int=20)
@@ -215,6 +284,11 @@ function enumerate_modular_data(N::Int; max_rank::Int=20)
             S_fixed, signs = fix_quantum_dims_float(S, r)
             Nijk = verlinde_float(S_fixed, r)
             if Nijk !== nothing && all(Nijk .>= 0)
+                ok, reason = admissibility_check(S_fixed, T, N, r)
+                if !ok
+                    println("  Rejected rank=$r: $reason")
+                    continue
+                end
                 push!(valid_candidates, (S=S_fixed, T=T, Nijk=Nijk, rank=r))
             end
         end
@@ -242,6 +316,10 @@ function enumerate_modular_data(N::Int; max_rank::Int=20)
             Nijk = verlinde_float(S_fixed, r)
 
             if Nijk !== nothing && all(Nijk .>= 0)
+                ok, reason = admissibility_check(S_fixed, T_total, N, r)
+                if !ok
+                    continue
+                end
                 # Compute level = lcm of factor levels
                 factor_names = join(["$(factor_irreps[k][idx_tuple[k]][3])d" for k in 1:length(pf)], "⊗")
                 push!(valid_candidates, (S=S_fixed, T=T_total, Nijk=Nijk, rank=r, name=factor_names))
