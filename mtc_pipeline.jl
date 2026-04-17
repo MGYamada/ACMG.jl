@@ -731,6 +731,12 @@ function lift_to_numerical(atom::AtomicIrrep, sol, N::Int)
     c8 = angle(p_plus / D) / (2π) * 8
     c_rat = rationalize(c8; tol=1e-4)
 
+    # Debug: show key values for central charge computation
+    # println("    [lift debug] α=$α i0=$(sol.unit) d=$d D=$(round(D;digits=4))")
+    # println("    T_reord diag = $([round(T_reord[j,j]; digits=4) for j in 1:r])")
+    # println("    p₊ = $(round(p_plus; digits=6))  p₊/D = $(round(p_plus/D; digits=6))")
+    # println("    c/8 = $(round(c8; digits=6))  c = $c_rat")
+
     (S=S_final, T=T_reord, c=c_rat, d=round.(d; digits=6), Nijk=sol.Nijk)
 end
 
