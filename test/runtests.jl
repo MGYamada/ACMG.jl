@@ -7,4 +7,5 @@ using ACMG
     include("test_ising.jl")
     include("test_sl2reps.jl")
     include("test_stratum_enum.jl")
+    include("test_blocku.jl")
 end

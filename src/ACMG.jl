@@ -47,6 +47,9 @@ include("SL2Reps.jl")
 # Stratum enumeration (combinatorial partition of rank by irrep dimensions)
 include("StratumEnum.jl")
 
+# Block-U parametrisation and MTC reconstruction (Phase 2)
+include("BlockU.jl")
+
 # Exports
 export ModularDatumFp, FusionRule
 export validate_modular_data, build_modular_datum, compute_alpha, compute_charge_conjugation
@@ -57,5 +60,10 @@ export matmul_mod, matpow_mod, diagmul_right, diagmul_left, lift_symmetric
 export fusion_isomorphic, fusion_matrix, validate
 export AtomicIrrep, build_atomic_catalog, all_divisors
 export Stratum, enumerate_strata, count_strata, describe_stratum, find_unit_indices
+export MTCCandidate, build_block_diagonal, reduce_matrix_to_Fp, reduce_vector_to_Fp
+export find_zeta_in_Fp, cyclotomic_to_Fp
+export t_eigenspace_decomposition, parameter_dim
+export o2_circle_points, apply_o2_block, verlinde_find_unit
+export find_mtcs_at_prime, signed_Fp
 
 end # module ACMG
