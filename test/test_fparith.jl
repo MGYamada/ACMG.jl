@@ -1,4 +1,5 @@
 using Test
+using LinearAlgebra: I
 import ACMG: is_square, sqrt_mod, primitive_root, root_of_unity, roots_of_unity
 import ACMG: matmul_mod, matpow_mod, diagmul_right, diagmul_left, lift_symmetric
 
