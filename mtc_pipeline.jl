@@ -840,7 +840,394 @@ function periodic_table(N_max::Int; max_rank::Int=6)
     table
 end
 
-println("mtc_pipeline.jl (v5: F_p exact) loaded.")
+println("mtc_pipeline.jl (v5: F_p exact + HC pentagon/hexagon) loaded.")
 println("Usage:")
 println("  results = classify_modular_data(5)")
 println("  table = periodic_table(10; max_rank=4)")
+println("  classify_mtc(5)  # Level I→II→III full pipeline")
+
+# ============================================================
+#  Level II: Pentagon solver via HomotopyContinuation.jl
+# ============================================================
+
+using TensorCategories
+using SparseArrays
+using KrylovKit
+import HomotopyContinuation
+const HC = HomotopyContinuation
+
+function eval_poly_complex(f, vals::Vector{ComplexF64})
+    isa(f, Integer) && return ComplexF64(f)
+    iszero(f) && return ComplexF64(0.0)
+    result = 0.0 + 0.0im
+    for (c, m) in zip(coefficients(f), monomials(f))
+        degs = degrees(m)
+        term = ComplexF64(Float64(numerator(c)) / Float64(denominator(c)))
+        for i in 1:length(degs)
+            degs[i] > 0 && (term *= vals[i]^degs[i])
+        end
+        result += term
+    end
+    result
+end
+
+function oscar_poly_to_hc(f, hc_vars::Vector{HC.Variable})
+    isa(f, Integer) && return HC.Expression(f)
+    iszero(f) && return HC.Expression(0)
+    expr = HC.Expression(0)
+    for (c, m) in zip(coefficients(f), monomials(f))
+        coef_expr = HC.Expression(BigInt(numerator(c)) // BigInt(denominator(c)))
+        degs = degrees(m)
+        term = coef_expr
+        for i in 1:length(degs)
+            degs[i] > 0 && (term *= hc_vars[i]^degs[i])
+        end
+        expr += term
+    end
+    expr
+end
+
+function build_hc_system(eqs, n::Int)
+    hc_vars = [HC.Variable(Symbol("x", i)) for i in 1:n]
+    hc_exprs = HC.Expression[]
+    for eq in eqs
+        (isa(eq, Integer) || iszero(eq)) && continue
+        push!(hc_exprs, oscar_poly_to_hc(eq, hc_vars))
+    end
+    HC.System(hc_exprs; variables=hc_vars), hc_vars
+end
+
+function get_pentagon_system(Nijk::Array{Int,3}, r::Int)
+    one_vec = zeros(Int, r); one_vec[1] = 1
+    C, eqs_raw = pentagon_equations(Nijk, one_vec)
+    eqs = filter(eq -> !(eq isa Integer) && !iszero(eq), eqs_raw)
+    R = parent(eqs[1])
+    n = nvars(R)
+    R, eqs, n
+end
+
+function solve_pentagon_homotopy(eqs, n::Int; slice::Int=0,
+                                 include_singular::Bool=false,
+                                 show_progress::Bool=false)
+    sys, hc_vars = build_hc_system(eqs, n)
+    if slice > 0
+        extra = [sum(HC.Expression(randn(ComplexF64)) * hc_vars[i] for i in 1:n) -
+                 HC.Expression(randn(ComplexF64)) for _ in 1:slice]
+        sys = HC.System(vcat(HC.expressions(sys), extra); variables=hc_vars)
+    end
+    result = HC.solve(sys; start_system=:polyhedral, show_progress=show_progress)
+    sols = include_singular ? HC.solutions(result) : HC.solutions(result; only_nonsingular=true)
+    nsols = HC.nsolutions(result)
+    nsing = HC.nsingular(result)
+    println("  HC pentagon: $(length(sols)) solutions (total=$nsols, singular=$nsing)")
+    [ComplexF64.(s) for s in sols]
+end
+
+function sparse_jacobian(eqs, derivs, x, n)
+    m = length(eqs)
+    rows = Int[]; cols = Int[]; vals = ComplexF64[]
+    for i in 1:m, j in 1:n
+        v = eval_poly_complex(derivs[i][j], x)
+        if abs(v) > 1e-15
+            push!(rows, i); push!(cols, j); push!(vals, v)
+        end
+    end
+    sparse(rows, cols, vals, m, n)
+end
+
+function refine_solution_newton(eqs, x0::Vector{ComplexF64}; tol=1e-14, max_iter=50)
+    n = length(x0)
+    derivs = [[derivative(eq, j) for j in 1:n] for eq in eqs]
+    x = copy(x0)
+    for _ in 1:max_iter
+        F_val = [eval_poly_complex(eq, x) for eq in eqs]
+        maximum(abs.(F_val)) < tol && return x
+        J = sparse_jacobian(eqs, derivs, x, n)
+        delta, _ = linsolve(v -> J' * (J * v), J' * F_val;
+                            ishermitian=true, isposdef=true, verbosity=0)
+        α = 1.0; res = maximum(abs.(F_val))
+        for _ in 1:20
+            x_new = x - α * delta
+            maximum(abs.([eval_poly_complex(eq, x_new) for eq in eqs])) < res &&
+                (x = x_new; break)
+            α *= 0.5
+        end
+    end
+    x
+end
+
+# ============================================================
+#  Level III: Hexagon solver (F fixed, solve for R)
+# ============================================================
+
+function oscar_poly_to_hc_complex(f, hc_vars::Vector{HC.Variable})
+    iszero(f) && return HC.Expression(0)
+    expr = HC.Expression(0)
+    for (c, m) in zip(coefficients(f), monomials(f))
+        coef = ComplexF64(Float64(real(c)), Float64(imag(c)))
+        term = HC.Expression(coef)
+        degs = degrees(m)
+        for i in 1:length(degs)
+            degs[i] > 0 && (term *= hc_vars[i]^degs[i])
+        end
+        expr += term
+    end
+    expr
+end
+
+function build_hc_system_complex(eqs, n::Int)
+    hc_vars = [HC.Variable(Symbol("r", i)) for i in 1:n]
+    hc_exprs = [oscar_poly_to_hc_complex(eq, hc_vars) for eq in eqs if !iszero(eq)]
+    HC.System(hc_exprs; variables=hc_vars), hc_vars
+end
+
+function get_hexagon_system(Nijk::Array{Int,3}, r::Int, F_values::Vector{<:Number})
+    one_vec = zeros(Int, r); one_vec[1] = 1
+    poly_C_fwd, poly_C_rev, eqs = hexagon_equations(Nijk, one_vec, ComplexF64.(F_values))
+    eqs_filt = filter(eq -> !(eq isa Integer) && !iszero(eq), eqs)
+    isempty(eqs_filt) && error("Hexagon produced no equations")
+    R_ring = parent(eqs_filt[1])
+    R_ring, eqs_filt, nvars(R_ring)
+end
+
+# --- Hexagon support functions ---
+
+function _coerce_complex(c::Number, K)
+    scalar = K isa AcbField ? K : base_ring(K)
+    re = scalar(Float64(real(c)))
+    im_part = scalar(Float64(imag(c)))
+    acb_val = re + onei(scalar) * im_part
+    K(acb_val)
+end
+
+function assign_F_to_associator!(poly_C, F_values::Vector{<:Number})
+    K = base_ring(poly_C)
+    m = poly_C.simples; one_vec = poly_C.one
+    y = copy(F_values)
+    for i in 1:m, j in 1:m, k in 1:m, o in 1:m
+        sum(one_vec[[i, j, k]]) > 0 && continue
+        (r, t) = size(poly_C.ass[i, j, k, o])
+        entries = [_coerce_complex(pop!(y), K) for _ in 1:(r * t)]
+        poly_C.ass[i, j, k, o] = matrix(K, r, t, entries)
+    end
+    @assert isempty(y) "F_values length mismatch"
+    poly_C
+end
+
+function invert_associator_numeric(F_values::Vector{ComplexF64},
+                                   mult::Array{Int,3}, one_vec::Vector{Int})
+    dummy = TensorCategories.six_j_category(QQ, mult)
+    dummy.one = one_vec; m = dummy.simples
+    y_stack = copy(F_values)
+    extracted = Tuple{Int,Int,Matrix{ComplexF64}}[]
+    for i in 1:m, j in 1:m, k in 1:m, o in 1:m
+        sum(one_vec[[i, j, k]]) > 0 && continue
+        (r, t) = size(dummy.ass[i, j, k, o])
+        entries = ComplexF64[pop!(y_stack) for _ in 1:(r*t)]
+        M = Matrix{ComplexF64}(undef, r, t)
+        for a in 1:r, b in 1:t; M[a,b] = entries[(a-1)*t+b]; end
+        push!(extracted, (r, t, M))
+    end
+    @assert isempty(y_stack)
+    F_inv = Vector{ComplexF64}(undef, length(F_values))
+    cursor = length(F_values)
+    for (r, t, M) in extracted
+        Minv = inv(M)
+        inv_entries = [Minv[a,b] for a in 1:r for b in 1:t]
+        for p in 1:(r*t); F_inv[cursor-(p-1)] = inv_entries[p]; end
+        cursor -= r * t
+    end
+    @assert cursor == 0
+    F_inv
+end
+
+function _number_of_variables_in_hexagon_equations(poly_C)
+    m = poly_C.simples; mult = poly_C.tensor_product
+    n_r = 0
+    for i in 1:m, j in 1:m, k in 1:m
+        N_ijk = mult[i,j,k]; N_ijk == 0 && continue
+        n_r += N_ijk^2
+    end
+    n_r
+end
+
+function hexagon_equations(mult::Array{Int,3}, one_vec::Vector{Int},
+                           F_values::Vector{ComplexF64})
+    m = size(mult, 1)
+    _dummy = TensorCategories.six_j_category(QQ, mult); _dummy.one = one_vec
+    expected_n_F = TensorCategories._number_of_variables_in_pentagon_equations(_dummy)
+    @assert length(F_values) == expected_n_F "F_values length mismatch"
+
+    Finv_values = invert_associator_numeric(F_values, mult, one_vec)
+    _dummy_cc = TensorCategories.six_j_category(AcbField(), mult)
+    _dummy_cc.one = one_vec
+    r_var_count = _number_of_variables_in_hexagon_equations(_dummy_cc)
+
+    R_ring, xs = polynomial_ring(AcbField(), 2 * r_var_count)
+    r_vars = xs[1:r_var_count]
+    s_vars = xs[r_var_count+1:2*r_var_count]
+
+    poly_C_fwd = TensorCategories.six_j_category(R_ring, mult)
+    poly_C_fwd.one = one_vec
+    assign_F_to_associator!(poly_C_fwd, F_values)
+
+    poly_C_rev = TensorCategories.six_j_category(R_ring, mult)
+    poly_C_rev.one = one_vec
+    assign_F_to_associator!(poly_C_rev, Finv_values)
+
+    function _fill_braiding!(poly_C, vars)
+        m_ = poly_C.simples
+        braid_arr = Array{MatElem, 3}(undef, m_, m_, m_)
+        y = copy(vars)
+        for i in 1:m_, j in 1:m_, k in 1:m_
+            N_ijk = mult[i,j,k]
+            if N_ijk == 0
+                braid_arr[i,j,k] = zero_matrix(R_ring, 0, 0); continue
+            end
+            entries = [pop!(y) for _ in 1:N_ijk^2]
+            braid_arr[i,j,k] = matrix(R_ring, N_ijk, N_ijk, entries)
+        end
+        @assert isempty(y)
+        TensorCategories.set_braiding!(poly_C, braid_arr)
+    end
+    _fill_braiding!(poly_C_fwd, r_vars)
+    _fill_braiding!(poly_C_rev, s_vars)
+
+    eqs = elem_type(R_ring)[]
+    Ss_fwd = simples(poly_C_fwd); Ss_rev = simples(poly_C_rev)
+
+    # (A) Left hexagon
+    for X in Ss_fwd, Y in Ss_fwd, Z in Ss_fwd
+        lhs = (braiding(X,Y) ⊗ id(Z)) ∘ associator(Y,X,Z) ∘ (id(Y) ⊗ braiding(X,Z))
+        rhs = associator(Y,Z,X) ∘ braiding(X, Y⊗Z) ∘ associator(X,Y,Z)
+        append!(eqs, collect(matrix(lhs - rhs))[:])
+    end
+
+    # (B) Right hexagon (in reverse category)
+    for X in Ss_rev, Y in Ss_rev, Z in Ss_rev
+        lhs = (braiding(X,Y) ⊗ id(Z)) ∘ associator(Y,X,Z) ∘ (id(Y) ⊗ braiding(X,Z))
+        rhs = associator(Y,Z,X) ∘ braiding(X, Y⊗Z) ∘ associator(X,Y,Z)
+        append!(eqs, collect(matrix(lhs - rhs))[:])
+    end
+
+    # (C) Inverse consistency: R^{ij}_k · S^{ji}_k = I
+    r_block_positions = Dict{Tuple{Int,Int,Int}, Vector{Int}}()
+    let y_pos = collect(1:r_var_count)
+        for i in 1:m, j in 1:m, k in 1:m
+            N_ijk = mult[i,j,k]; N_ijk == 0 && continue
+            popped = [pop!(y_pos) for _ in 1:N_ijk^2]
+            r_block_positions[(i,j,k)] = popped
+        end
+    end
+    s_block_positions = Dict{Tuple{Int,Int,Int}, Vector{Int}}()
+    let y_pos = collect(1:r_var_count)
+        for i in 1:m, j in 1:m, k in 1:m
+            N_ijk = mult[i,j,k]; N_ijk == 0 && continue
+            popped = [pop!(y_pos) for _ in 1:N_ijk^2]
+            s_block_positions[(i,j,k)] = popped
+        end
+    end
+
+    for i in 1:m, j in 1:m, k in 1:m
+        N_ijk = mult[i,j,k]; N_ijk == 0 && continue
+        r_pos = r_block_positions[(i,j,k)]
+        R_block = [r_vars[r_pos[(a-1)*N_ijk+b]] for a in 1:N_ijk, b in 1:N_ijk]
+        haskey(s_block_positions, (j,i,k)) || continue
+        s_pos = s_block_positions[(j,i,k)]
+        S_block = [s_vars[s_pos[(a-1)*N_ijk+b]] for a in 1:N_ijk, b in 1:N_ijk]
+        for a in 1:N_ijk, c in 1:N_ijk
+            expr = sum(R_block[a,b] * S_block[b,c] for b in 1:N_ijk)
+            target = (a == c) ? one(R_ring) : zero(R_ring)
+            push!(eqs, expr - target)
+        end
+    end
+
+    poly_C_fwd, poly_C_rev, filter(e -> !iszero(e), unique(eqs))
+end
+
+function solve_hexagon_homotopy(eqs, n::Int; show_progress::Bool=false)
+    sys, hc_vars = build_hc_system_complex(eqs, n)
+    result = HC.solve(sys; start_system=:polyhedral, show_progress=show_progress)
+    sols = HC.solutions(result; only_nonsingular=true)
+    nsols = HC.nsolutions(result)
+    nsing = HC.nsingular(result)
+    println("  HC hexagon: $(length(sols)) nonsingular (total=$nsols, singular=$nsing)")
+    [ComplexF64.(s) for s in sols]
+end
+
+# ============================================================
+#  Full pipeline: Level I (F_p) → Level II (Pentagon) → Level III (Hexagon)
+# ============================================================
+
+"""
+    classify_mtc(N; max_rank=6, solve_hexagon=true)
+
+Full MTC classification at conductor N:
+  Level I:   modular data (S, T, Nijk) via F_p exact arithmetic
+  Level II:  pentagon equations → F-symbols via HC
+  Level III: hexagon equations → R-symbols via HC
+"""
+function classify_mtc(N::Int; max_rank::Int=6, solve_hexagon::Bool=true,
+                      auto_slice::Bool=true, max_hexagon_per_F::Int=3)
+    println("=" ^ 60)
+    println("  Full MTC Classification: N = $N")
+    println("=" ^ 60)
+
+    # Level I
+    modular_data = classify_modular_data(N; max_rank=max_rank)
+
+    for (idx, md) in enumerate(modular_data)
+        r = length(md.d)
+        println("\n─── MD $idx: rank=$r  c=$(md.c)  d=$(md.d) ───")
+
+        r == 1 && (println("  Pointed (rank 1). F = trivial."); continue)
+
+        # Level II: Pentagon
+        println("  Level II: Pentagon")
+        try
+            R_ring, eqs, n_F = get_pentagon_system(md.Nijk, r)
+            println("    $n_F F-variables, $(length(eqs)) equations")
+
+            if n_F == 0
+                println("    No free F-symbols. Trivial solution.")
+                continue
+            end
+
+            F_sols = solve_pentagon_homotopy(eqs, n_F)
+            if isempty(F_sols) && auto_slice
+                for s in 1:min(n_F-1, 5)
+                    println("    [auto] retrying with slice=$s")
+                    F_sols = solve_pentagon_homotopy(eqs, n_F; slice=s)
+                    !isempty(F_sols) && break
+                end
+            end
+            # Refine
+            F_sols = [refine_solution_newton(eqs, s) for s in F_sols]
+            println("    $(length(F_sols)) pentagon solution(s)")
+
+            # Level III: Hexagon
+            if solve_hexagon && !isempty(F_sols)
+                println("  Level III: Hexagon")
+                n_try = min(length(F_sols), max_hexagon_per_F)
+                for (ki, F_sol) in enumerate(F_sols[1:n_try])
+                    println("    F-solution $ki:")
+                    try
+                        R_ring, hex_eqs, n_R = get_hexagon_system(md.Nijk, r, F_sol)
+                        println("      $n_R R-variables, $(length(hex_eqs)) equations")
+                        n_R == 0 && (println("      No R-symbols. Trivial braiding."); continue)
+                        R_sols = solve_hexagon_homotopy(hex_eqs, n_R)
+                        println("      → $(length(R_sols)) braiding(s)")
+                    catch e
+                        println("      Hexagon failed: $e")
+                    end
+                end
+            end
+        catch e
+            println("    Pentagon failed: $e")
+        end
+    end
+
+    println("\n" * "=" ^ 60)
+    println("N=$N classification complete.")
+    println("=" ^ 60)
+end
