@@ -12,4 +12,5 @@ using ACMG
     include("test_block_u_general.jl")
     include("test_phase4_fibonacci.jl")
     include("test_phase4_lift.jl")
+    include("test_phase4_verify.jl")
 end

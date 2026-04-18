@@ -50,12 +50,14 @@ include("PentagonSolver.jl")
 include("HexagonEquations.jl")
 include("HexagonSolver.jl")
 include("ModularDataLift.jl")
+include("Verify.jl")
 
 using .PentagonEquations
 using .PentagonSolver
 using .HexagonEquations
 using .HexagonSolver
 using .ModularDataLift
+using .Verify
 
 # Re-export the user-facing API
 export get_pentagon_system
@@ -66,5 +68,9 @@ export assign_F_to_associator!, invert_associator_numeric
 # ModularDataLift
 export DiscreteLogTable, lift_T_Fp_to_complex, lift_S_sqrtd_to_complex
 export lift_mtc_candidate
+# Verify
+export pentagon_residuals, hexagon_residuals
+export extract_R_block, block_positions_R
+export ribbon_residuals, VerifyReport, verify_mtc
 
 end # module Phase4
