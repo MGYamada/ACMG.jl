@@ -20,12 +20,12 @@ Tests for CRT module (Phase 3) — pure F_p parts, no Oscar.
         @test mod(x, 11) == 3
     end
 
-    @testset "crt (multi-modulus)" begin
+    @testset "acmg_crt (multi-modulus)" begin
         residues = [2, 3, 2]
         moduli = [3, 5, 7]
         # x ≡ 2 (mod 3), x ≡ 3 (mod 5), x ≡ 2 (mod 7)
         # classic: x = 23 (mod 105)
-        (x, M) = crt(residues, moduli)
+        (x, M) = acmg_crt(residues, moduli)
         @test M == 105
         @test mod(x, 3) == 2
         @test mod(x, 5) == 3
@@ -33,7 +33,7 @@ Tests for CRT module (Phase 3) — pure F_p parts, no Oscar.
         @test x == 23
 
         # Single residue
-        (x, M) = crt([5], [7])
+        (x, M) = acmg_crt([5], [7])
         @test x == 5
         @test M == 7
     end

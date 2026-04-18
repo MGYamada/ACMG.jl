@@ -69,7 +69,7 @@ export t_eigenspace_decomposition, parameter_dim
 export o2_circle_points, apply_o2_block, verlinde_find_unit
 export find_mtcs_at_prime, signed_Fp
 # Phase 3: CRT reconstruction
-export crt, crt2, rational_reconstruct, compute_sqrt_d_mod_p
+export acmg_crt, crt2, rational_reconstruct, compute_sqrt_d_mod_p
 export fusion_signature, group_mtcs_by_fusion
 export reconstruct_rational, reconstruct_in_Z_sqrt_d
 export reconstruct_matrix_in_Z_sqrt_d, reconstruct_S_matrix

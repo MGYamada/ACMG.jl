@@ -54,14 +54,17 @@ function crt2(r1::Integer, m1::Integer, r2::Integer, m2::Integer)
 end
 
 """
-    crt(residues::Vector{<:Integer}, moduli::Vector{<:Integer})
+    acmg_crt(residues::Vector{<:Integer}, moduli::Vector{<:Integer})
         -> (Int, Int)
 
 CRT across multiple moduli. Pairwise fold via `crt2`.
 Returns (x, M) where M = prod(moduli) and x is the unique residue
 in [0, M).
+
+Named `acmg_crt` to avoid name collision with `Oscar.crt` (also exported
+by AbstractAlgebra, Nemo, Hecke, Singular).
 """
-function crt(residues::Vector{<:Integer}, moduli::Vector{<:Integer})
+function acmg_crt(residues::Vector{<:Integer}, moduli::Vector{<:Integer})
     length(residues) == length(moduli) || error("length mismatch")
     length(residues) >= 1 || error("empty input")
 
@@ -172,7 +175,7 @@ Returns (a, b) or nothing.
 function reconstruct_rational(values_by_prime::Dict{Int, Int})
     primes = collect(keys(values_by_prime))
     residues = [values_by_prime[p] for p in primes]
-    (c, M) = crt(residues, primes)
+    (c, M) = acmg_crt(residues, primes)
     return rational_reconstruct(c, M)
 end
 
