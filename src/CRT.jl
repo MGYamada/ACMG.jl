@@ -224,6 +224,11 @@ end
 
 Compute one √d mod p (a specific branch chosen by returning the smaller
 representative). Returns nothing if d is not a QR mod p.
+
+Note: this chooses a branch by "smaller representative", which is NOT
+Galois-consistent across primes. For multi-prime CRT reconstruction,
+use `compute_sqrt3_cyclotomic_mod_p(p, zeta24)` or similar functions
+that use a cyclotomic formula for consistent branch selection.
 """
 function compute_sqrt_d_mod_p(d::Int, p::Int)
     d_mod = mod(d, p)
@@ -240,22 +245,57 @@ function compute_sqrt_d_mod_p(d::Int, p::Int)
 end
 
 """
+    compute_sqrt3_cyclotomic_mod_p(p::Int) -> Int
+
+Compute √3 mod p using the cyclotomic identity √3 = ζ₂₄² + ζ₂₄⁻².
+This gives a branch consistent with the choice of ζ₂₄ returned by
+`find_zeta_in_Fp(24, p)`, so it is Galois-consistent across primes
+(all primes see √3 as coming from the same Galois-orbit element).
+
+Requires 24 | p - 1.
+"""
+function compute_sqrt3_cyclotomic_mod_p(p::Int)
+    zeta24 = find_zeta_in_Fp(24, p)
+    # √3 = ζ₂₄² + ζ₂₄⁻² = ζ₂₄² + ζ₂₄²²
+    return mod(powermod(zeta24, 2, p) + powermod(zeta24, 22, p), p)
+end
+
+"""
+    compute_sqrt2_cyclotomic_mod_p(p::Int) -> Int
+
+Compute √2 mod p using the cyclotomic identity √2 = ζ₈ + ζ₈⁻¹ = ζ₂₄³ + ζ₂₄²¹.
+Galois-consistent across primes with 24 | p - 1.
+"""
+function compute_sqrt2_cyclotomic_mod_p(p::Int)
+    zeta24 = find_zeta_in_Fp(24, p)
+    return mod(powermod(zeta24, 3, p) + powermod(zeta24, 21, p), p)
+end
+
+"""
     reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime::Dict{Int, Matrix{Int}},
-                                    d::Int; bound::Int = 5)
+                                    d::Int; bound::Int = 5,
+                                    sqrtd_fn = compute_sqrt_d_mod_p)
         -> Matrix{Tuple{Int, Int}}
 
 Reconstruct a matrix of Z[√d] entries from F_p reductions across primes.
 Each entry is returned as a pair (a, b) meaning a + b·√d.
 
+`sqrtd_fn(d, p)` should return a specific branch of √d mod p. The same
+branch must be chosen consistently across all input primes for CRT to
+succeed. Default `compute_sqrt_d_mod_p` chooses the smaller representative
+(which may NOT be Galois-consistent). For d = 3 with primes dividing
+24, pass `(d, p) -> compute_sqrt3_cyclotomic_mod_p(p)` for consistency.
+
 Requires d to be a QR at all input primes.
 """
 function reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime::Dict{Int, Matrix{Int}},
-                                         d::Int; bound::Int = 5)
+                                         d::Int; bound::Int = 5,
+                                         sqrtd_fn = compute_sqrt_d_mod_p)
     primes = collect(keys(matrix_by_prime))
     # Precompute √d mod p for each prime
     sqrtd_by_prime = Dict{Int, Int}()
     for p in primes
-        s = compute_sqrt_d_mod_p(d, p)
+        s = sqrtd_fn(d, p)
         s === nothing && error("$d is not a QR mod $p")
         sqrtd_by_prime[p] = s
     end
@@ -270,7 +310,11 @@ function reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime::Dict{Int, Matrix{Int}},
             values_ij = Dict(p => matrix_by_prime[p][i, j] for p in primes)
             recon = reconstruct_in_Z_sqrt_d(values_ij, d, sqrtd_by_prime; bound = bound)
             if recon === nothing
-                error("Failed to reconstruct entry ($i, $j) in Z[√$d] with bound=$bound")
+                error("Failed to reconstruct entry ($i, $j) in Z[√$d] with bound=$bound. " *
+                      "This may indicate: (a) inconsistent sqrt branch across primes " *
+                      "(try passing a cyclotomic-consistent sqrtd_fn), " *
+                      "(b) entry is not in Z[√$d] (try larger bound or different d), " *
+                      "(c) the MTC candidate matching was wrong.")
             end
             result[i, j] = (Int(recon[1]), Int(recon[2]))
         end
@@ -305,13 +349,14 @@ is √(scale_d). For SU(2)_4 (D² = 12), scale_d = 3.
 """
 function reconstruct_S_matrix(group::Dict{Int, MTCCandidate};
                               scale_d::Int = 3,
-                              bound::Int = 5)
+                              bound::Int = 5,
+                              sqrtd_fn = compute_sqrt_d_mod_p)
     primes = collect(keys(group))
 
     # Build matrix_by_prime: S_scaled[p][i, j] = (2 · √scale_d · S'[i, j]) mod p
     matrix_by_prime = Dict{Int, Matrix{Int}}()
     for p in primes
-        s = compute_sqrt_d_mod_p(scale_d, p)
+        s = sqrtd_fn(scale_d, p)
         s === nothing && error("$scale_d is not a QR mod $p")
         two_s = mod(2 * s, p)
         S_p = group[p].S_Fp
@@ -319,7 +364,7 @@ function reconstruct_S_matrix(group::Dict{Int, MTCCandidate};
         matrix_by_prime[p] = M_p
     end
 
-    return reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime, scale_d; bound = bound)
+    return reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime, scale_d; bound = bound, sqrtd_fn = sqrtd_fn)
 end
 
 """
@@ -338,9 +383,10 @@ so we check (scale · √d · S_Fp) ≡ recon (mod p) pointwise.
 function verify_reconstruction(recon::Matrix{Tuple{Int, Int}},
                                 candidate::MTCCandidate,
                                 d::Int;
-                                scale::Int = 2)
+                                scale::Int = 2,
+                                sqrtd_fn = compute_sqrt_d_mod_p)
     p = candidate.p
-    s = compute_sqrt_d_mod_p(d, p)
+    s = sqrtd_fn(d, p)
     s === nothing && return false
     scale_s = mod(scale * s, p)
 
