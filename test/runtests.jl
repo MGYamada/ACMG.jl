@@ -9,4 +9,5 @@ using ACMG
     include("test_stratum_enum.jl")
     include("test_blocku.jl")
     include("test_crt.jl")
+    include("test_block_u_general.jl")
 end

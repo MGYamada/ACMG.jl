@@ -30,11 +30,23 @@ for p in test_primes
     for (i, c) in enumerate(cands)
         d_signed = [ACMG.signed_Fp(x, c.p) for x in c.d]
         T_signed = [ACMG.signed_Fp(x, c.p) for x in c.T_Fp]
-        params_signed = (ACMG.signed_Fp(c.U_params[1], c.p),
-                         ACMG.signed_Fp(c.U_params[2], c.p),
-                         c.U_params[3])
-        println("  [$i] unit=$(c.unit_index), params=$params_signed, d=$d_signed")
-        println("       T=$T_signed")
+        # U_params is now an n×n matrix (block-U). Show its size and signed entries.
+        U = c.U_params
+        if isa(U, AbstractMatrix)
+            U_signed = [ACMG.signed_Fp(U[i, j], c.p) for i in 1:size(U, 1), j in 1:size(U, 2)]
+            println("  [$i] unit=$(c.unit_index), U_block=$(size(U)) det=", 
+                    mod(U[1,1]*U[2,2] - U[1,2]*U[2,1], c.p) == 1 ? "+1" : "-1",
+                    ", d=$d_signed")
+            println("       T=$T_signed")
+            println("       U=$U_signed")
+        else
+            # Backward compat for old Tuple format
+            params_signed = (ACMG.signed_Fp(U[1], c.p),
+                             ACMG.signed_Fp(U[2], c.p),
+                             U[3])
+            println("  [$i] unit=$(c.unit_index), params=$params_signed, d=$d_signed")
+            println("       T=$T_signed")
+        end
     end
     println()
 end
@@ -68,10 +80,14 @@ for p in test_primes
     two_s3 = mod(2 * s3, p)
     entry = mod(two_s3 * matching.S_Fp[1, 1], p)
     entry_signed = ACMG.signed_Fp(entry, p)
-    params_signed = (ACMG.signed_Fp(matching.U_params[1], p),
-                     ACMG.signed_Fp(matching.U_params[2], p),
-                     matching.U_params[3])
-    println("  p=$p: 2√3·S[1,1] = $entry (signed: $entry_signed), params=$params_signed")
+    U = matching.U_params
+    if isa(U, AbstractMatrix)
+        det_str = mod(U[1,1]*U[2,2] - U[1,2]*U[2,1], p) == 1 ? "+1" : "-1"
+        println("  p=$p: 2√3·S[1,1] = $entry (signed: $entry_signed), det(U)=$det_str")
+    else
+        params_signed = (ACMG.signed_Fp(U[1], p), ACMG.signed_Fp(U[2], p), U[3])
+        println("  p=$p: 2√3·S[1,1] = $entry (signed: $entry_signed), params=$params_signed")
+    end
 end
 
 # Also: compare full S_Fp · (2√3) (signed) across primes

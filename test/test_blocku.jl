@@ -169,9 +169,15 @@ Group 1 is implemented here; Group 2 is in test_blocku_oscar.jl (TODO).
     @testset "MTCCandidate show" begin
         # Just check it doesn't throw
         N = zeros(Int, 2, 2, 2)
-        c = MTCCandidate(41, (1, 0, +1), [14 16; 16 27], [1, 18], 1, N, [1, 7], 9)
-        s = string(c)
-        @test occursin("p=41", s)
-        @test occursin("unit=1", s)
+        # New format: U_params can be Matrix or Tuple
+        c1 = MTCCandidate(41, [1 0; 0 1], [14 16; 16 27], [1, 18], 1, N, [1, 7], 9)
+        s1 = string(c1)
+        @test occursin("p=41", s1)
+        @test occursin("unit=1", s1)
+
+        # Legacy Tuple format still works
+        c2 = MTCCandidate(41, (1, 0, +1), [14 16; 16 27], [1, 18], 1, N, [1, 7], 9)
+        s2 = string(c2)
+        @test occursin("p=41", s2)
     end
 end

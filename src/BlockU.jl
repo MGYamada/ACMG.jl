@@ -284,6 +284,184 @@ function transpose_mod(A::Matrix{Int}, p::Int)
 end
 
 # ============================================================
+#  General O(n) parametrisation (Cayley) — n ≥ 2
+# ============================================================
+
+"""
+    cayley_so_n(params::Vector{Int}, n::Int, p::Int)
+        -> Union{Nothing, Matrix{Int}}
+
+Construct a matrix in SO(n)(F_p) from `params`, the C(n, 2) coefficients
+of the upper-triangular part of an antisymmetric matrix A.
+
+`params` is indexed by (i, j) with i < j in lex order:
+    params[1] = A[1, 2]
+    params[2] = A[1, 3]
+    ...
+    params[n-1] = A[1, n]
+    params[n] = A[2, 3]
+    ...
+    params[C(n,2)] = A[n-1, n]
+
+Returns `(I - A)(I + A)^{-1}` mod p.
+Returns `nothing` if (I + A) is singular mod p (Cayley exceptional locus).
+"""
+function cayley_so_n(params::Vector{Int}, n::Int, p::Int)
+    length(params) == div(n * (n - 1), 2) ||
+        error("expected $(div(n*(n-1), 2)) params for n=$n; got $(length(params))")
+
+    # Build antisymmetric A
+    A = zeros(Int, n, n)
+    k = 1
+    for i in 1:n
+        for j in (i+1):n
+            A[i, j] = mod(params[k], p)
+            A[j, i] = mod(-params[k], p)
+            k += 1
+        end
+    end
+
+    I_mat = I_n(n)
+    IpA = [mod(I_mat[i, j] + A[i, j], p) for i in 1:n, j in 1:n]
+    IpA_inv = inverse_mod_p(IpA, p)
+    IpA_inv === nothing && return nothing
+    ImA = [mod(I_mat[i, j] - A[i, j], p) for i in 1:n, j in 1:n]
+    return matmul_mod(ImA, IpA_inv, p)
+end
+
+"""
+    inverse_mod_p(M::Matrix{Int}, p::Int) -> Union{Nothing, Matrix{Int}}
+
+Compute the inverse of an n×n matrix mod p via Gauss-Jordan elimination.
+Returns `nothing` if M is singular mod p.
+"""
+function inverse_mod_p(M::Matrix{Int}, p::Int)
+    n = size(M, 1)
+    n == size(M, 2) || error("M must be square")
+
+    # Augment [M | I]
+    aug = zeros(Int, n, 2n)
+    for i in 1:n
+        for j in 1:n
+            aug[i, j] = mod(M[i, j], p)
+        end
+        aug[i, n + i] = 1
+    end
+
+    # Gauss-Jordan
+    for col in 1:n
+        # Find pivot
+        pivot_row = 0
+        for r in col:n
+            if aug[r, col] != 0
+                pivot_row = r
+                break
+            end
+        end
+        pivot_row == 0 && return nothing  # singular
+
+        if pivot_row != col
+            # Swap rows
+            for j in 1:(2n)
+                aug[col, j], aug[pivot_row, j] = aug[pivot_row, j], aug[col, j]
+            end
+        end
+
+        # Scale pivot row
+        pivot = aug[col, col]
+        pivot_inv = invmod(pivot, p)
+        for j in 1:(2n)
+            aug[col, j] = mod(aug[col, j] * pivot_inv, p)
+        end
+
+        # Eliminate other rows
+        for r in 1:n
+            r == col && continue
+            factor = aug[r, col]
+            factor == 0 && continue
+            for j in 1:(2n)
+                aug[r, j] = mod(aug[r, j] - factor * aug[col, j], p)
+            end
+        end
+    end
+
+    return aug[:, (n+1):(2n)]
+end
+
+"""
+    enumerate_so_n_Fp(n::Int, p::Int) -> Vector{Matrix{Int}}
+
+Enumerate all SO(n)(F_p) matrices via Cayley parametrisation. There are
+~p^{C(n,2)} such matrices (minus the singular Cayley locus). Returns
+a Vector of n×n Int matrices.
+
+WARNING: count grows as p^{n(n-1)/2}. For n=2 this is ~p (small);
+for n=3 it is ~p^3 (~10^5 for p=73); for n≥4 likely infeasible by
+brute force.
+"""
+function enumerate_so_n_Fp(n::Int, p::Int)
+    n >= 1 || error("n must be ≥ 1")
+    n == 1 && return [reshape([1], 1, 1)]  # SO(1) = {1}
+    dim_params = div(n * (n - 1), 2)
+    results = Matrix{Int}[]
+    for params_tuple in Iterators.product(ntuple(_ -> 0:(p-1), dim_params)...)
+        params = collect(params_tuple)
+        U = cayley_so_n(params, n, p)
+        U === nothing && continue
+        push!(results, U)
+    end
+    return results
+end
+
+"""
+    enumerate_o_n_Fp(n::Int, p::Int) -> Vector{Matrix{Int}}
+
+Enumerate all O(n)(F_p) matrices.
+O(n) = SO(n) ⊔ (reflection · SO(n)). We use a single fixed reflection
+(diag(-1, 1, 1, ..., 1)) and concatenate the two cosets.
+
+Note: the SO(n) part comes from Cayley, but the Cayley map misses some
+SO(n) elements (those where (I + A) is singular). For most uses (e.g. MTC
+sweep), this small loss is acceptable; the missing locus is
+codimension ≥ 1.
+"""
+function enumerate_o_n_Fp(n::Int, p::Int)
+    so_part = enumerate_so_n_Fp(n, p)
+    # Reflection R = diag(-1, 1, 1, ..., 1)
+    R = I_n(n)
+    R[1, 1] = p - 1  # = -1 mod p
+    refl_part = [matmul_mod(R, U, p) for U in so_part]
+    return vcat(so_part, refl_part)
+end
+
+"""
+    apply_block_U(S::Matrix{Int}, indices::Vector{Int},
+                  U_block::Matrix{Int}, p::Int) -> Matrix{Int}
+
+Apply an n×n block transformation U_block to S in the n-dimensional
+subspace indexed by `indices` (length must equal size(U_block, 1)).
+Other positions are left unchanged. Returns U^T · S · U (mod p), where
+U is the full r×r matrix that is identity off the indexed block and
+U_block on it.
+"""
+function apply_block_U(S::Matrix{Int}, indices::Vector{Int},
+                       U_block::Matrix{Int}, p::Int)
+    n_block = length(indices)
+    size(U_block) == (n_block, n_block) ||
+        error("U_block size $(size(U_block)) doesn't match |indices|=$n_block")
+
+    r = size(S, 1)
+    U_full = I_n(r)
+    for ii in 1:n_block
+        for jj in 1:n_block
+            U_full[indices[ii], indices[jj]] = U_block[ii, jj]
+        end
+    end
+    UT = transpose_mod(U_full, p)
+    return matmul_mod(matmul_mod(UT, S, p), U_full, p)
+end
+
+# ============================================================
 #  Step 5: Verlinde integrality check
 # ============================================================
 
@@ -406,14 +584,22 @@ end
 
 function Base.show(io::IO, c::MTCCandidate)
     d_signed = [signed_Fp(x, c.p) for x in c.d]
+    # U_params can be a Matrix (general O(n)) or a Tuple (legacy O(2))
+    params_str = if isa(c.U_params, AbstractMatrix)
+        n = size(c.U_params, 1)
+        "U=$(n)×$(n) block"
+    else
+        "params=$(c.U_params)"
+    end
     print(io, "MTCCandidate(p=$(c.p), unit=$(c.unit_index), ",
           "d=$d_signed, D²=$(signed_Fp(c.D2, c.p)), ",
-          "params=$(c.U_params))")
+          "$params_str)")
 end
 
 """
     find_mtcs_at_prime(catalog::Vector{AtomicIrrep}, stratum::Stratum,
-                       p::Int; verlinde_threshold::Int = 3)
+                       p::Int; verlinde_threshold::Int = 3,
+                       max_block_dim::Int = 3)
         -> Vector{MTCCandidate}
 
 Top-level Phase 2 driver at a single prime.
@@ -422,15 +608,21 @@ Steps:
 1. Build block-diagonal atomic (S, T) from stratum + catalog.
 2. Reduce to F_p (requires N | p-1 where N = catalog[].N).
 3. Decompose T into eigenspaces; compute parameter_dim.
-4. For each degenerate eigenspace of dimension 2, sweep O(2)(F_p).
-   (Only one degenerate 2-dim eigenspace is currently supported;
-   higher dimensions or multiple degenerate spaces TODO.)
-5. For each (u, v, det) combination, apply block-U to S, then check
+4. For each degenerate eigenspace of dimension n_θ ≥ 2, sweep
+   O(n_θ)(F_p) via Cayley parametrisation. (Currently only ONE
+   degenerate eigenspace is supported per stratum; multiple
+   degenerate eigenspaces TODO via cartesian-product sweep.)
+5. For each block-U candidate, apply transformation to S, then check
    Verlinde integrality.
 6. Return all MTC candidates found.
+
+`max_block_dim` is a safety guard against runaway enumeration: if any
+degenerate eigenspace has n_θ > max_block_dim, an error is raised.
+Default 3 is feasible at p = 73-100; raising to 4 would take hours.
 """
 function find_mtcs_at_prime(catalog::Vector{AtomicIrrep}, stratum::Stratum,
-                            p::Int; verlinde_threshold::Int = 3)
+                            p::Int; verlinde_threshold::Int = 3,
+                            max_block_dim::Int = 3)
     # Common N
     N = catalog[first(keys(stratum.multiplicities))].N
 
@@ -446,58 +638,52 @@ function find_mtcs_at_prime(catalog::Vector{AtomicIrrep}, stratum::Stratum,
     eigenspaces = t_eigenspace_decomposition(T_atomic, p)
     p_dim = parameter_dim(eigenspaces)
 
-    # Classify strata by degeneracy structure
-    # Currently supports:
-    # - All n_θ = 1 (no sweep needed, just check atomic directly)
-    # - Exactly one n_θ = 2 (one O(2) sweep)
-    # Higher cases TODO
-
     degenerate = [(theta, indices) for (theta, indices) in eigenspaces if length(indices) >= 2]
 
+    # Case 1: no degeneracy → atomic S is already an MTC candidate (modulo signs)
     if isempty(degenerate)
-        # No degeneracy - atomic S should already be (close to) MTC
-        # (but signs and identifications may differ)
         r = size(S_atomic, 1)
         result = verlinde_find_unit(S_atomic, p; threshold = verlinde_threshold)
         if result !== nothing
-            (u, N) = result
+            (u, N_tensor) = result
             Suu_inv = invmod(S_atomic[u, u], p)
             d = [mod(S_atomic[u, i] * Suu_inv, p) for i in 1:r]
             D2 = sum(mod(d[i] * d[i], p) for i in 1:r) % p
             return [MTCCandidate(p, :atomic, copy(S_atomic), copy(T_atomic),
-                                 u, N, d, D2)]
+                                 u, N_tensor, d, D2)]
         else
             return MTCCandidate[]
         end
     end
 
+    # Case 2+: one degenerate eigenspace of dimension n ≥ 2
     length(degenerate) == 1 || error(
-        "Only one degenerate eigenspace supported for now; got $(length(degenerate))")
+        "Multiple degenerate eigenspaces not yet supported; got $(length(degenerate))")
     (theta_deg, indices_deg) = degenerate[1]
+    n_block = length(indices_deg)
 
-    if length(indices_deg) != 2
-        error("Only n_θ = 2 supported in this prototype; got n_θ = $(length(indices_deg))")
-    end
+    n_block <= max_block_dim || error(
+        "Degenerate eigenspace dim n=$n_block exceeds max_block_dim=$max_block_dim. " *
+        "Naive enumeration would be O(p^$(div(n_block*(n_block-1), 2))). " *
+        "Increase max_block_dim if you really want to proceed.")
 
-    i, j = indices_deg[1], indices_deg[2]
-    idx_pair = (i, j)
+    # Enumerate U_blocks in O(n)(F_p) via Cayley + reflection
+    U_blocks = enumerate_o_n_Fp(n_block, p)
 
     candidates = MTCCandidate[]
-    for (u, v) in o2_circle_points(p)
-        for det_sign in [+1, -1]
-            S_prime = apply_o2_block(S_atomic, idx_pair, u, v, det_sign, p)
-            result = verlinde_find_unit(S_prime, p; threshold = verlinde_threshold)
-            if result !== nothing
-                (u_idx, N) = result
-                r = size(S_prime, 1)
-                Suu_inv = invmod(S_prime[u_idx, u_idx], p)
-                d = [mod(S_prime[u_idx, i] * Suu_inv, p) for i in 1:r]
-                D2 = sum(mod(d[m] * d[m], p) for m in 1:r) % p
-                push!(candidates, MTCCandidate(
-                    p, (u, v, det_sign),
-                    copy(S_prime), copy(T_atomic),
-                    u_idx, N, d, D2))
-            end
+    for U_block in U_blocks
+        S_prime = apply_block_U(S_atomic, indices_deg, U_block, p)
+        result = verlinde_find_unit(S_prime, p; threshold = verlinde_threshold)
+        if result !== nothing
+            (u_idx, N_tensor) = result
+            r = size(S_prime, 1)
+            Suu_inv = invmod(S_prime[u_idx, u_idx], p)
+            d = [mod(S_prime[u_idx, i] * Suu_inv, p) for i in 1:r]
+            D2 = sum(mod(d[m] * d[m], p) for m in 1:r) % p
+            push!(candidates, MTCCandidate(
+                p, U_block,
+                copy(S_prime), copy(T_atomic),
+                u_idx, N_tensor, d, D2))
         end
     end
     return candidates
