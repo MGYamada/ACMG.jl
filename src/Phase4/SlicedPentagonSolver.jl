@@ -1,23 +1,28 @@
 """
     SlicedPentagonSolver
 
-Wire Kitaev/Hodge gauge slice into the pentagon HC solver.
+Wire Kitaev/Hodge gauge slice into the pentagon HomotopyContinuation solver.
 
 Given a fusion rule and a prior F-symbol solution (used as a base point
 for linearization), builds:
   1. The KitaevComplex F-coordinate gauge analysis,
   2. A mapping from KitaevComplex FKeys to TensorCategories pentagon
      variables x_1, ..., x_n,
-  3. Linear slice constraints expressed in pentagon variables,
-  4. The augmented polynomial system passed to HomotopyContinuation.
+  3. Linear slice constraints in the pentagon variables,
+  4. An augmented HomotopyContinuation `System` with Oscar pentagon
+     equations + the slice constraints.
 
-The slice kills the continuous gauge orbit (dim 1 for Ising, dim 1 for
-Fibonacci), reducing the HC mixed volume correspondingly.
+The slice kills the continuous gauge orbit, reducing the HC mixed
+volume correspondingly.
 
-This module depends on:
-  - KitaevComplex: for slice_basis
-  - PentagonEquations: for TensorCategories pentagon system
-  - HexagonEquations: for the FKey ↔ x_i mapping (mirrors `assign_F_to_associator!`)
+# Note on coefficient rings
+
+The pentagon equations from `get_pentagon_system` live in an Oscar
+`QQMPolyRing` (rational coefficients). The Kitaev slice constraints have
+coefficients like 1/√2 or 1/√φ — irrational in general. We therefore
+bypass the Oscar polynomial ring for the slice and construct the
+augmented system directly at the HomotopyContinuation level, where
+arbitrary real/complex coefficients are natively supported.
 """
 module SlicedPentagonSolver
 
@@ -28,53 +33,45 @@ using ACMG: FusionRule
 using ..KitaevComplex
 using ..PentagonEquations
 using ..PentagonSolver
+import HomotopyContinuation
+const HC = HomotopyContinuation
 
 export build_fkey_to_xvar_map
-export slice_constraints_as_polynomials
-export get_sliced_pentagon_system
-export solve_pentagon_with_slice
+export slice_constraints_as_hc
+export build_sliced_hc_system
+export get_sliced_pentagon_system_hc
+
+# ============================================================
+# F-key ↔ pentagon variable map
+# ============================================================
 
 """
     build_fkey_to_xvar_map(Nijk, r, one_vec) -> Dict{NTuple{6,Int}, Int}
 
-Build a Dict mapping F-symbol key (a,b,c,d,e,f) (1-based) to pentagon
-variable index i such that x_i corresponds to F^{abc}_{d;e,f}.
+Build a Dict mapping F-symbol key (i,j,k,o,e,f) (1-based) to pentagon
+variable index p such that x_p corresponds to F^{ijk}_{o; e, f}.
 
-Follows the exact traversal used by `assign_F_to_associator!`:
-  - Nested loops over (i, j, k, o) ∈ 1:m × 1:m × 1:m × 1:m
-  - Skip blocks where i, j, or k is the unit
-  - Block at (i,j,k,o) has size (r_block, t_block)
-  - Entries filled in row-major order into a stack, then pop! from the end
-    during assignment
+Mirrors the traversal of `assign_F_to_associator!` in HexagonEquations.jl:
+  - Nested loops (i,j,k,o) ∈ 1:m^4, skipping blocks with any of i,j,k = unit.
+  - Each block has row basis e (with N^{ij}_e ≥ 1, N^{ek}_o ≥ 1)
+    and column basis f (with N^{jk}_f ≥ 1, N^{if}_o ≥ 1).
+  - Entries iterated in row-major order, pushed onto a stack.
+  - Pentagon variables are assigned via pop! from the stack's end.
 
-This produces the correspondence:
-  variable x_p  ↔  F-symbol entry at some (i,j,k,o) block at (a, b)
-
-In TensorCategories' convention, for a block at (i,j,k,o):
-  - rows = paths (i⊗j → e, e⊗k → o) indexed by e ∈ i⊗j with e⊗k → o
-  - cols = paths (j⊗k → f, i⊗f → o) indexed by f ∈ j⊗k with i⊗f → o
-  - entry (row_idx_of_e, col_idx_of_f) = F^{ijk}_{o; e, f}
-
-The channel indices e and f are enumerated in their natural 1:m order
-(only allowed values included).
+Hence the first (i,j,k,o,e,f) encountered (row-major, first non-trivial
+block) gets pentagon variable index n, the second gets n-1, and so on.
 """
 function build_fkey_to_xvar_map(Nijk::Array{Int,3}, r::Int, one_vec::Vector{Int})
     m = r
-    # Simulate the same traversal. We'll assign each block's (row, col) entry
-    # a pentagon-variable index, then apply the pop! convention.
-
-    # Step 1: for each (i,j,k,o), enumerate the row-basis e's and col-basis f's.
-    block_info = Tuple{Int,Int,Int,Int,Vector{Int},Vector{Int}}[]  # (i,j,k,o, rows_e, cols_f)
+    flat_fkeys = NTuple{6,Int}[]
     for i in 1:m, j in 1:m, k in 1:m, o in 1:m
         sum(one_vec[[i, j, k]]) > 0 && continue
-        # Rows: e with N^{ij}_e ≥ 1 AND N^{ek}_o ≥ 1
         rows_e = Int[]
         for e in 1:m
             if Nijk[i, j, e] ≥ 1 && Nijk[e, k, o] ≥ 1
                 push!(rows_e, e)
             end
         end
-        # Cols: f with N^{jk}_f ≥ 1 AND N^{if}_o ≥ 1
         cols_f = Int[]
         for f in 1:m
             if Nijk[j, k, f] ≥ 1 && Nijk[i, f, o] ≥ 1
@@ -83,33 +80,11 @@ function build_fkey_to_xvar_map(Nijk::Array{Int,3}, r::Int, one_vec::Vector{Int}
         end
         isempty(rows_e) && continue
         isempty(cols_f) && continue
-        push!(block_info, (i, j, k, o, rows_e, cols_f))
-    end
-
-    # Step 2: Build a flat list of (fkey = (i,j,k,o,e,f)) in ROW-MAJOR order per block,
-    # ordered by block traversal. This is the order entries were POPPED.
-    flat_fkeys = NTuple{6,Int}[]
-    for (i, j, k, o, rows_e, cols_f) in block_info
         for e in rows_e, f in cols_f
-            # row-major: entries[(a-1)*t + b] = M[a, b]
-            # push in row-major: iterate row a (= index of e), then col b (= index of f)
             push!(flat_fkeys, (i, j, k, o, e, f))
         end
     end
 
-    # Step 3: The pop! convention.  `assign_F_to_associator!` does:
-    #   y = copy(F_values)
-    #   for each block in traversal order:
-    #     for each entry in the block (in row-major order, 1..r*t):
-    #       entry = pop!(y)
-    #
-    # So the FIRST entry assigned (first block, first row-major position)
-    # equals y[end] = F_values[end].
-    #
-    # Hence  flat_fkeys[1]  ↔  x_{length(F_values)}
-    #        flat_fkeys[2]  ↔  x_{length(F_values) - 1}
-    #        ...
-    #        flat_fkeys[n]  ↔  x_1
     n = length(flat_fkeys)
     fkey_to_xvar = Dict{NTuple{6,Int}, Int}()
     for (pos, fkey) in enumerate(flat_fkeys)
@@ -118,106 +93,131 @@ function build_fkey_to_xvar_map(Nijk::Array{Int,3}, r::Int, one_vec::Vector{Int}
     return fkey_to_xvar
 end
 
+# ============================================================
+# Slice constraints as HC expressions
+# ============================================================
+
 """
-    slice_constraints_as_polynomials(ga::GaugeAnalysis,
-                                     fkey_to_xvar::Dict,
-                                     R::Oscar.MPolyRing) -> Vector
+    slice_constraints_as_hc(ga, fkey_to_xvar, hc_vars) -> Vector{HC.Expression}
 
-Given the result of `analyze_gauge(fcs)`, translate each column of
-`ga.Delta_gauge_eff` (a vector in F-coordinate space) into a linear
-polynomial in the pentagon variables x_1, …, x_n. Setting this
-polynomial = 0 kills that gauge direction.
+Translate each gauge direction (column of the unit-preserving effective
+gauge image) into a linear HC.Expression in pentagon variables.
 
-Returns `Vector{elem_type(R)}` of `ga.gauge_orbit_dim` linear polynomials.
+Returns `gauge_orbit_dim(ga)` linear expressions. Each expression
+vanishes at the base F-solution by construction, so the base F remains
+a solution of the augmented system.
 
-The polynomial for gauge direction `v ∈ R^nF` is:
-    Σ_k v[k] * (x_{pent_var_idx} - F_value_at_key)
+The expression for gauge direction `v ∈ R^nF` is:
 
-where key = ga.fcs.vars[k] and pent_var_idx comes from fkey_to_xvar.
-We subtract the base F-value at each position so that the polynomial
-vanishes AT the base F-solution (which sits on the slice by construction).
+    sum_k v[k] * (x_{p_k} - F_base_at_key_k)
 
-Note: entries with no corresponding pentagon variable (e.g. fixed by
-TensorCategories' unit-axiom filtering) are dropped from the sum —
-they contribute only a constant, which cancels at the base point.
+restricted to F-entries that correspond to pentagon variables (the
+unit-axiom-fixed entries don't appear as variables in TensorCategories'
+pentagon system).
 """
-function slice_constraints_as_polynomials(ga::KitaevComplex.GaugeAnalysis,
-                                          fkey_to_xvar::Dict,
-                                          R)
+function slice_constraints_as_hc(ga::KitaevComplex.GaugeAnalysis,
+                                 fkey_to_xvar::Dict,
+                                 hc_vars::Vector{HC.Variable})
     fcs = ga.fcs
-    xs = gens(R)
-    polys = Any[]
-
-    # Eff gauge has ga.gauge_orbit_dim columns spanning the effective gauge image.
-    # Use SVD of Delta_gauge_eff to get a basis of im Δ_gauge_eff.
+    # Orthonormal basis of im Δ_gauge_eff
     Dg_eff = ga.Delta_gauge_eff
     F = svd(Dg_eff; full = true)
     rank_g = ga.gauge_orbit_dim
-    # Left singular vectors for nonzero singular values span im Δ_gauge_eff
     gauge_basis = F.U[:, 1:rank_g]   # nF × rank_g
 
+    exprs = HC.Expression[]
     for col in 1:rank_g
         v = gauge_basis[:, col]
-        poly = zero(R)
+        expr = HC.Expression(0)
         for (k, key) in enumerate(fcs.vars)
             coeff = v[k]
             abs(coeff) < 1e-12 && continue
             if haskey(fkey_to_xvar, key)
-                pent_idx = fkey_to_xvar[key]
+                pidx = fkey_to_xvar[key]
                 Fval = KitaevComplex.F_value(fcs, key)
-                # Constraint: v · (x - F_base) = 0, so x is allowed to move
-                # only perpendicular to v from the base point.
-                poly += coeff * (xs[pent_idx] - Fval)
+                # Linear constraint vanishing at base F:
+                expr += coeff * (hc_vars[pidx] - Fval)
             end
-            # Entries not in fkey_to_xvar correspond to unit-axiom-fixed
-            # positions (TensorCategories doesn't generate variables for them).
-            # These contribute a constant v[k] * (F_val_const - F_val_const) = 0
-            # under the assumption that at base point x = F, so we can safely skip.
+            # Unit-axiom-fixed entries: no variable, but v[k] contributes
+            # v[k] * (F_const - F_const) = 0, so they can be skipped safely.
         end
-        push!(polys, poly)
+        push!(exprs, expr)
     end
-    return polys
+    return exprs
 end
 
+# ============================================================
+# Augmented HC system
+# ============================================================
+
 """
-    get_sliced_pentagon_system(Nijk, r, base_F_func) -> (R, eqs_augmented, n, n_slice)
+    build_sliced_hc_system(Nijk, r, base_F_func)
+        -> (sys::HC.System, hc_vars::Vector{HC.Variable},
+            n::Int, n_slice::Int, ga::GaugeAnalysis)
 
-Assemble the augmented pentagon system with Kitaev slice constraints.
+Build the augmented HomotopyContinuation System:
+  - Pentagon equations from TensorCategories, converted via
+    `oscar_poly_to_hc`,
+  - Kitaev gauge slice constraints appended as HC expressions.
 
-Arguments
-- `Nijk`: fusion array
-- `r`: rank
-- `base_F_func`: function (a,b,c,d,e,f) -> Float64 giving a base F-solution
-  (used as the linearization point for the Kitaev gauge analysis)
+Returns the combined system, the HC variables, the number of pentagon
+variables `n`, the number of slice constraints added `n_slice`, and
+the GaugeAnalysis object (for later inspection).
 
-Returns
-- `R`: polynomial ring
-- `eqs_augmented`: pentagon equations + slice constraints
-- `n`: number of pentagon variables
-- `n_slice`: number of slice constraints added (= gauge_orbit_dim)
+Note: the resulting system may have `n + n_slice > n_eqs_original`.
+HomotopyContinuation handles over-determined systems, but the useful
+regime is when slice constraints are exactly gauge-orbit-dimension many
+(one for Fibonacci, one for Ising) so the augmented system is
+well-balanced with respect to the reduced mixed volume.
 """
-function get_sliced_pentagon_system(Nijk::Array{Int,3}, r::Int,
-                                     base_F_func::Function)
-    # Pentagon system from TensorCategories
+function build_sliced_hc_system(Nijk::Array{Int,3}, r::Int,
+                                base_F_func::Function)
+    # 1. Oscar pentagon system
     R, eqs, n = PentagonEquations.get_pentagon_system(Nijk, r)
 
-    # KitaevComplex analysis
+    # 2. KitaevComplex analysis
     fr = FusionRule(Nijk)
     fcs = KitaevComplex.build_F_coord_space(fr, base_F_func)
     ga  = KitaevComplex.analyze_gauge(fcs)
 
-    # Build unit vector: unit is object 1
+    # 3. Build HC variables and convert Oscar eqs
+    hc_vars = [HC.Variable(Symbol("x", i)) for i in 1:n]
+    hc_exprs = HC.Expression[]
+    for eq in eqs
+        (isa(eq, Integer) || iszero(eq)) && continue
+        push!(hc_exprs, PentagonSolver.oscar_poly_to_hc(eq, hc_vars))
+    end
+
+    # 4. FKey ↔ pentagon variable mapping
     one_vec = zeros(Int, r)
     one_vec[1] = 1
-
-    # F-key ↔ pentagon-variable mapping
     fkey_to_xvar = build_fkey_to_xvar_map(Nijk, r, one_vec)
 
-    # Slice constraints
-    slice_polys = slice_constraints_as_polynomials(ga, fkey_to_xvar, R)
+    # 5. Slice constraints as HC expressions
+    slice_exprs = slice_constraints_as_hc(ga, fkey_to_xvar, hc_vars)
+    for e in slice_exprs
+        push!(hc_exprs, e)
+    end
 
-    eqs_aug = vcat(eqs, slice_polys)
-    return R, eqs_aug, n, length(slice_polys)
+    sys = HC.System(hc_exprs; variables = hc_vars)
+    return sys, hc_vars, n, length(slice_exprs), ga
+end
+
+"""
+    get_sliced_pentagon_system_hc(Nijk, r, base_F_func) -> NamedTuple
+
+Convenience wrapper returning a NamedTuple with fields
+  (sys, hc_vars, n, n_slice, ga, fkey_to_xvar)
+for downstream HC solving and inspection.
+"""
+function get_sliced_pentagon_system_hc(Nijk::Array{Int,3}, r::Int,
+                                        base_F_func::Function)
+    sys, hc_vars, n, n_slice, ga = build_sliced_hc_system(Nijk, r, base_F_func)
+    one_vec = zeros(Int, r)
+    one_vec[1] = 1
+    fkey_to_xvar = build_fkey_to_xvar_map(Nijk, r, one_vec)
+    return (sys = sys, hc_vars = hc_vars, n = n, n_slice = n_slice,
+            ga = ga, fkey_to_xvar = fkey_to_xvar)
 end
 
 end # module SlicedPentagonSolver

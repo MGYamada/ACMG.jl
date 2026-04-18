@@ -2,24 +2,25 @@
 Tests for `ACMG.Phase4.SlicedPentagonSolver`.
 
 Strategy:
-  1. Fibonacci sanity check:
-     - Pentagon HC without slice returns 4 solutions.
-     - WITH Kitaev slice (1 constraint), HC should return fewer solutions
-       (gauge-equivalent ones collapsed).
-  2. Ising test:
-     - Pentagon HC without slice: mixed volume ~477k, infeasible.
-     - WITH slice (1 constraint): measure mixed volume reduction.
+  1. Fibonacci FKey ↔ pentagon variable mapping sanity.
+  2. Fibonacci: build_sliced_hc_system returns a valid HC system,
+     base F satisfies every equation in it.
+  3. Ising: same checks. Reports the system size for info.
+
+Actual HC solving (timing / mixed volume) is deferred to a separate
+script to avoid inflating test runtime.
 """
 
 using Test
 using LinearAlgebra
 using ACMG
 using ACMG.Phase4
+import HomotopyContinuation as HC
 
 const KC  = Phase4.KitaevComplex
 const SPS = Phase4.SlicedPentagonSolver
 
-# ---------------- Fibonacci helpers (reused) ----------------
+# ---------------- Fibonacci helpers ----------------
 
 function fib_Nijk()
     r = 2
@@ -97,15 +98,11 @@ end
         one_vec = [1, 0]
         fkey_map = SPS.build_fkey_to_xvar_map(Nijk, 2, one_vec)
 
-        # Fibonacci pentagon has 5 variables (we saw this in test output).
-        # The (τ,τ,τ,τ) block contributes 4 entries + possibly 1 extra elsewhere.
-        # Check that all mapped indices are in [1, 5] and unique.
         @test length(fkey_map) > 0
         vals = collect(values(fkey_map))
-        @test all(1 .≤ vals .≤ 5)
+        @test all(1 .≤ vals .≤ 5)            # Fibonacci has 5 pentagon vars
         @test length(unique(vals)) == length(vals)
 
-        # All mapped FKeys should have indices (i,j,k,o) with i, j, k != 1 (unit).
         for key in keys(fkey_map)
             i, j, k, _o, _e, _f = key
             @test !(1 in (i, j, k))
@@ -113,69 +110,46 @@ end
     end
 
     # --------------------------------------------------------------------
-    @testset "Fibonacci sliced pentagon system" begin
+    @testset "Fibonacci sliced HC system" begin
         Nijk = fib_Nijk()
         F_fn = fib_F_func()
 
-        R, eqs_aug, n, n_slice = SPS.get_sliced_pentagon_system(Nijk, 2, F_fn)
+        result = SPS.get_sliced_pentagon_system_hc(Nijk, 2, F_fn)
+        @test result.n == 5
+        @test result.n_slice == 1
 
-        @test n == 5                 # Fibonacci pentagon vars
-        @test n_slice == 1           # Fibonacci gauge orbit dim = 1
-        # Augmented system has pentagon eqs + 1 slice constraint
-        @test length(eqs_aug) > 12   # original pentagon eqs kept
-
-        # Slice constraint should vanish at the base F-solution.
-        # Extract base F values as a vector ordered by pentagon variable index.
-        one_vec = [1, 0]
-        fkey_map = SPS.build_fkey_to_xvar_map(Nijk, 2, one_vec)
-        F_vec = zeros(Float64, n)
-        for (key, pidx) in fkey_map
+        # Base F as a ComplexF64 vector, ordered by pentagon variable index
+        F_vec = zeros(ComplexF64, result.n)
+        for (key, pidx) in result.fkey_to_xvar
             F_vec[pidx] = F_fn(key...)
         end
 
-        # Evaluate the slice polynomial(s) at F_vec
-        slice_polys = eqs_aug[end - n_slice + 1 : end]
-        xs = gens(R)
-        for p in slice_polys
-            val = Float64(evaluate(p, F_vec))
-            @test abs(val) < 1e-10
-        end
+        # Evaluate HC system at base F — should all be ~0
+        residuals = result.sys(F_vec)
+        max_resid = maximum(abs.(residuals))
+        @test max_resid < 1e-10
+
+        @info "Fibonacci sliced HC system" n=result.n n_slice=result.n_slice n_equations=length(residuals) max_residual_at_base=max_resid
     end
 
     # --------------------------------------------------------------------
-    @testset "Ising sliced pentagon: mapping + slice build" begin
+    @testset "Ising sliced HC system" begin
         Nijk = ising_Nijk()
         F_fn = ising_F_func()
 
-        R, eqs_aug, n, n_slice = SPS.get_sliced_pentagon_system(Nijk, 3, F_fn)
+        result = SPS.get_sliced_pentagon_system_hc(Nijk, 3, F_fn)
+        @test result.n > 0
+        @test result.n_slice == 1             # Ising effective gauge = 1
 
-        # Ising pentagon variables count (from TensorCategories' traversal)
-        @test n > 0
-        @test n_slice == 1             # Ising effective gauge = 1
-
-        # Base F solution satisfies the slice constraint
-        one_vec = [1, 0, 0]
-        fkey_map = SPS.build_fkey_to_xvar_map(Nijk, 3, one_vec)
-        F_vec = zeros(Float64, n)
-        for (key, pidx) in fkey_map
+        F_vec = zeros(ComplexF64, result.n)
+        for (key, pidx) in result.fkey_to_xvar
             F_vec[pidx] = F_fn(key...)
         end
 
-        slice_polys = eqs_aug[end - n_slice + 1 : end]
-        for p in slice_polys
-            val = Float64(evaluate(p, F_vec))
-            @test abs(val) < 1e-10
-        end
-
-        # Base F also satisfies pentagon equations (standard Ising solves pentagon)
-        pent_polys = eqs_aug[1 : end - n_slice]
-        max_resid = 0.0
-        for p in pent_polys
-            val = abs(Float64(evaluate(p, F_vec)))
-            max_resid = max(max_resid, val)
-        end
+        residuals = result.sys(F_vec)
+        max_resid = maximum(abs.(residuals))
         @test max_resid < 1e-10
 
-        @info "Ising pentagon" n_vars=n n_slice=n_slice n_eqs=length(eqs_aug)
+        @info "Ising sliced HC system" n=result.n n_slice=result.n_slice n_equations=length(residuals) max_residual_at_base=max_resid
     end
 end
