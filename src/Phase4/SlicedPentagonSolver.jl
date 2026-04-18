@@ -25,6 +25,9 @@ using LinearAlgebra
 using Oscar
 using TensorCategories
 using ACMG: FusionRule
+using ..KitaevComplex
+using ..PentagonEquations
+using ..PentagonSolver
 
 export build_fkey_to_xvar_map
 export slice_constraints_as_polynomials
