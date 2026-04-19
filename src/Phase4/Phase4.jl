@@ -51,8 +51,6 @@ include("HexagonEquations.jl")
 include("HexagonSolver.jl")
 include("ModularDataLift.jl")
 include("Verify.jl")
-include("KitaevComplex.jl")
-include("SlicedPentagonSolver.jl")
 
 using .PentagonEquations
 using .PentagonSolver
@@ -60,8 +58,6 @@ using .HexagonEquations
 using .HexagonSolver
 using .ModularDataLift
 using .Verify
-using .KitaevComplex
-using .SlicedPentagonSolver
 
 # Re-export the user-facing API
 export get_pentagon_system
@@ -76,13 +72,5 @@ export lift_mtc_candidate
 export pentagon_residuals, hexagon_residuals
 export extract_R_block, block_positions_R
 export ribbon_residuals, VerifyReport, verify_mtc
-
-# KitaevComplex (Kitaev 2006 App E.6 tangent cohomology)
-# Scalar-level implementation for multiplicity-free fusion categories.
-# Currently complete for n = 0, 1; n ≥ 2 awaits F-symbol integration
-# for the interior face maps fₖⁿ (1 ≤ k ≤ n).
-export C_basis, C_dim
-export delta_matrix, chi_matrix
-export verify_homotopy
 
 end # module Phase4
