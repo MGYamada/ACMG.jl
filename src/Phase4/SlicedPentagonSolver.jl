@@ -27,6 +27,8 @@ arbitrary real/complex coefficients are natively supported.
 module SlicedPentagonSolver
 
 using LinearAlgebra
+using SparseArrays
+using KrylovKit
 using Oscar
 using TensorCategories
 using ACMG: FusionRule
@@ -40,6 +42,9 @@ export build_fkey_to_xvar_map
 export slice_constraints_as_hc
 export build_sliced_hc_system
 export get_sliced_pentagon_system_hc
+export build_slice_linear_system
+export solve_pentagon_newton_with_slice
+export solve_pentagon_newton_with_slice
 
 # ============================================================
 # F-key ↔ pentagon variable map
@@ -218,6 +223,202 @@ function get_sliced_pentagon_system_hc(Nijk::Array{Int,3}, r::Int,
     fkey_to_xvar = build_fkey_to_xvar_map(Nijk, r, one_vec)
     return (sys = sys, hc_vars = hc_vars, n = n, n_slice = n_slice,
             ga = ga, fkey_to_xvar = fkey_to_xvar)
+end
+
+# ============================================================
+# Slice linear system as a plain numerical matrix
+# ============================================================
+
+"""
+    build_slice_linear_system(ga, fkey_to_xvar, n) -> (A::Matrix{ComplexF64}, b::Vector{ComplexF64})
+
+Produce the linear slice constraints as a numerical system
+
+    A * x = b
+
+where `x ∈ ℂ^n` is the pentagon variable vector (ordered by pentagon-variable
+index) and `A` has `gauge_orbit_dim(ga)` rows.
+
+Each row `k` corresponds to a gauge orbit vector `v_k` (orthonormal basis
+column of `im Δ_gauge_eff`). The raw constraint in F-coord space is:
+
+    Σ_i v_k[i] · (F_i - F_base_i) = 0.
+
+For F-entries with a pentagon variable, `F_i = x_p`. For unit-axiom-fixed
+entries, `F_i` is a constant equal to `F_base_i`, so those terms vanish.
+What remains is:
+
+    Σ_{i with var} v_k[i] · x_{p(i)}  =  Σ_{i with var} v_k[i] · F_base_i.
+
+So `A[k, p(i)] += v_k[i]` and `b[k] += v_k[i] * F_base_i`, iterated over
+F-entries that have a pentagon variable.
+
+By construction `A · F_base_vec = b`, so the base F solution sits on the
+slice.
+"""
+function build_slice_linear_system(ga::KitaevComplex.GaugeAnalysis,
+                                   fkey_to_xvar::Dict,
+                                   n::Int)
+    fcs = ga.fcs
+    F_svd = svd(ga.Delta_gauge_eff; full = true)
+    rank_g = ga.gauge_orbit_dim
+    gauge_basis = F_svd.U[:, 1:rank_g]   # nF × rank_g, columns = orthonormal gauge dirs
+
+    A = zeros(ComplexF64, rank_g, n)
+    b = zeros(ComplexF64, rank_g)
+
+    for col in 1:rank_g
+        v = gauge_basis[:, col]
+        for (i, key) in enumerate(fcs.vars)
+            coeff = v[i]
+            abs(coeff) < 1e-12 && continue
+            haskey(fkey_to_xvar, key) || continue     # skip unit-fixed entries
+            pidx = fkey_to_xvar[key]
+            Fval = ComplexF64(KitaevComplex.F_value(fcs, key))
+            A[col, pidx] += coeff
+            b[col]       += coeff * Fval
+        end
+    end
+    return A, b
+end
+
+# ============================================================
+# Newton with slice
+# ============================================================
+
+"""
+    solve_pentagon_newton_with_slice(Nijk, r, base_F_func;
+                                     initial_points = nothing,
+                                     max_trials = 20, max_iter = 200,
+                                     tol = 1e-12,
+                                     perturb_scale = 0.1,
+                                     slice_weight = 1.0,
+                                     verbose = false)
+        -> Vector{Vector{ComplexF64}}
+
+Damped Newton solver for pentagon equations augmented with Kitaev gauge
+slice constraints. Slice rows are appended to the residual vector and
+Jacobian; normal equations `(J'J) δ = J'F` are solved via KrylovKit.
+
+# Arguments
+
+- `Nijk`, `r`, `base_F_func`: fusion data + base F-symbol (the base F
+  must be a pentagon solution; it is used as the linearization point for
+  Kitaev slice construction, and also as the default initial point for
+  the first Newton trial).
+- `initial_points`: if provided, a `Vector{Vector{ComplexF64}}` of starting
+  points. If `nothing`, the base F (ordered by pentagon variable index)
+  is used as the first trial, followed by `max_trials-1` random
+  perturbations of scale `perturb_scale`.
+- `slice_weight`: multiplier on slice residual / Jacobian rows (unused in
+  normal equations under unit weight; included for experimentation).
+
+# Returns
+
+Vector of `ComplexF64` pentagon-variable vectors that satisfy both
+pentagon and slice to tolerance `tol`.
+
+# Rationale
+
+Pentagon alone has continuous gauge orbit → Jacobian is rank-deficient
+along gauge directions → Newton can drift along the orbit without
+converging. Adding the Kitaev slice fills the rank deficiency canonically
+(Hodge orthogonal to gauge orbit), allowing Newton to converge locally
+near the base F and, with perturbations, to reach other gauge classes of
+the same fusion ring (e.g., the 8 Ising gauge classes distinguished by
+central charge).
+"""
+function solve_pentagon_newton_with_slice(Nijk::Array{Int,3}, r::Int,
+                                          base_F_func::Function;
+                                          initial_points::Union{Nothing,
+                                              Vector{Vector{ComplexF64}}} = nothing,
+                                          max_trials::Int = 20,
+                                          max_iter::Int = 200,
+                                          tol::Real = 1e-12,
+                                          perturb_scale::Real = 0.1,
+                                          slice_weight::Real = 1.0,
+                                          verbose::Bool = false)
+    # 1. Pentagon system (Oscar)
+    R, eqs, n = PentagonEquations.get_pentagon_system(Nijk, r)
+    derivs = [[derivative(eq, j) for j in 1:n] for eq in eqs]
+
+    # 2. Kitaev gauge analysis
+    fr = FusionRule(Nijk)
+    fcs = KitaevComplex.build_F_coord_space(fr, base_F_func)
+    ga  = KitaevComplex.analyze_gauge(fcs)
+
+    # 3. FKey ↔ pentagon var mapping
+    one_vec = zeros(Int, r)
+    one_vec[1] = 1
+    fkey_to_xvar = build_fkey_to_xvar_map(Nijk, r, one_vec)
+
+    # 4. Slice as linear system A·x = b
+    A_slice, b_slice = build_slice_linear_system(ga, fkey_to_xvar, n)
+    n_slice = size(A_slice, 1)
+
+    # 5. Base F vector (pentagon-variable-ordered)
+    F_base_vec = zeros(ComplexF64, n)
+    for (key, pidx) in fkey_to_xvar
+        F_base_vec[pidx] = ComplexF64(base_F_func(key...))
+    end
+
+    # 6. Initial points
+    if initial_points === nothing
+        initial_points = Vector{Vector{ComplexF64}}()
+        push!(initial_points, copy(F_base_vec))
+        for _ in 2:max_trials
+            push!(initial_points,
+                  F_base_vec + perturb_scale * randn(ComplexF64, n))
+        end
+    end
+
+    # 7. Newton loop
+    solutions = Vector{Vector{ComplexF64}}()
+    for (trial, x0) in enumerate(initial_points)
+        x = copy(x0)
+
+        for iter in 1:max_iter
+            # Pentagon residual + slice residual
+            F_pent = ComplexF64[PentagonSolver.eval_poly_complex(eq, x) for eq in eqs]
+            F_sl   = A_slice * x - b_slice
+            F_val  = vcat(F_pent, slice_weight * F_sl)
+            res = maximum(abs.(F_val))
+
+            if res < tol
+                # Check solution not duplicate
+                is_dup = any(norm(x - s) < 1e-8 for s in solutions)
+                is_dup || push!(solutions, copy(x))
+                verbose && println("  trial $trial: converged at iter $iter, res=$res")
+                break
+            end
+
+            # Pentagon Jacobian + slice Jacobian (= A_slice, constant)
+            J_pent = PentagonSolver.sparse_jacobian(eqs, derivs, x, n)
+            J_sl   = sparse(slice_weight * A_slice)
+            J = vcat(J_pent, J_sl)
+
+            # Normal equations J' J δ = J' F (via KrylovKit)
+            delta, _ = linsolve(v -> J' * (J * v), J' * F_val;
+                                ishermitian = true, isposdef = true, verbosity = 0)
+
+            # Damped line search
+            alpha = 1.0
+            for _ in 1:20
+                x_new = x - alpha * delta
+                F_pent_new = ComplexF64[PentagonSolver.eval_poly_complex(eq, x_new) for eq in eqs]
+                F_sl_new   = A_slice * x_new - b_slice
+                F_new      = vcat(F_pent_new, slice_weight * F_sl_new)
+                if maximum(abs.(F_new)) < res
+                    x = x_new
+                    break
+                end
+                alpha *= 0.5
+            end
+        end
+    end
+
+    verbose && println("  Newton+slice: $(length(solutions)) unique solutions across $(length(initial_points)) trials")
+    return solutions
 end
 
 end # module SlicedPentagonSolver

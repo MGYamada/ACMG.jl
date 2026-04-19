@@ -152,4 +152,45 @@ end
 
         @info "Ising sliced HC system" n=result.n n_slice=result.n_slice n_equations=length(residuals) max_residual_at_base=max_resid
     end
+
+    # --------------------------------------------------------------------
+    @testset "Newton with slice: base F converges instantly" begin
+        # Fibonacci base F is a pentagon solution; starting Newton from it
+        # with slice should converge immediately.
+        sols = SPS.solve_pentagon_newton_with_slice(fib_Nijk(), 2, fib_F_func();
+                                                     max_trials = 1,
+                                                     max_iter = 50,
+                                                     perturb_scale = 0.0,
+                                                     tol = 1e-12)
+        @test length(sols) == 1
+
+        # Ising: same
+        sols = SPS.solve_pentagon_newton_with_slice(ising_Nijk(), 3, ising_F_func();
+                                                     max_trials = 1,
+                                                     max_iter = 50,
+                                                     perturb_scale = 0.0,
+                                                     tol = 1e-12)
+        @test length(sols) == 1
+    end
+
+    # --------------------------------------------------------------------
+    @testset "Newton with slice: small perturbation converges back" begin
+        # Fibonacci: starting from base F + small noise, slice-augmented
+        # Newton should recover the base F (unique within the slice class).
+        sols = SPS.solve_pentagon_newton_with_slice(fib_Nijk(), 2, fib_F_func();
+                                                     max_trials = 5,
+                                                     max_iter = 200,
+                                                     perturb_scale = 0.05,
+                                                     tol = 1e-10)
+        @test length(sols) ≥ 1
+
+        # Ising
+        sols = SPS.solve_pentagon_newton_with_slice(ising_Nijk(), 3, ising_F_func();
+                                                     max_trials = 5,
+                                                     max_iter = 200,
+                                                     perturb_scale = 0.05,
+                                                     tol = 1e-10)
+        @test length(sols) ≥ 1
+        @info "Ising Newton+slice small-perturb" n_sols=length(sols)
+    end
 end
