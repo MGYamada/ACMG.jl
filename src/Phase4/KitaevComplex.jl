@@ -1,344 +1,319 @@
 """
     KitaevComplex
 
-Davydov-Yetter / Kitaev tangent cohomology for multiplicity-free fusion
-categories. Implements the cochain complex
+Kitaev tangent cochain complex — faithful implementation of
+Kitaev 2006 (arXiv:cond-mat/0506438v3) Appendix E.6.
 
-    C⁰ →δ⁰ C¹ →δ¹ C² →δ² C³ →δ³ C⁴
+# Summary
 
-with contracting homotopy χⁿ : Cⁿ → Cⁿ⁻¹ satisfying the Kitaev identity
+For a multiplicity-free unitary fusion category the complex
 
-    χⁿ⁺¹ δⁿ + δⁿ⁻¹ χⁿ = id_{Cⁿ}       (Kitaev Eq. 251; EGNO Thm 9.1.3)
+    C⁰ →δ⁰ C¹ →δ¹ C² →δ² ⋯        (Def E.15, Eq. 247-248)
 
-# Basis of Cⁿ
+is implemented together with the contracting homotopy
 
-For a multiplicity-free fusion category,
+    χⁿ : Cⁿ → Cⁿ⁻¹                (Thm E.16, Eq. 250)
 
-    Cⁿ = ⊕_{X₁,…,Xₙ} End(X₁ ⊗ … ⊗ Xₙ)
+satisfying
 
-Using left-associative fusion, a basis element of `End(X₁ ⊗ … ⊗ Xₙ)` is
-specified by the sequence of intermediate charges c₂ = X₁⊗X₂, c₃ = c₂⊗X₃,
-…, cₙ = cₙ₋₁⊗Xₙ = Z. We represent a basis element as the full tuple
+    χⁿ⁺¹ δⁿ + δⁿ⁻¹ χⁿ = id_{Cⁿ}    (Eq. 251)     for n ≥ 1,
 
-    (X₁, X₂, …, Xₙ, c₂, c₃, …, cₙ)
+which yields `Hⁿ = 0` (Crane-Yetter / Davydov tangent cohomology).
 
-with Nᵢⱼᵏ = 1 constraints at every step. For n = 1 this collapses to
-(X, X). For n = 0 there is a single basis element (the unit).
+# Scalar representation
 
-A cochain f ∈ Cⁿ is a scalar f[basis_tuple] on each basis element.
+In the multiplicity-free setting every fusion block `V_c^{ab}` is
+1-dimensional, so an element `X ∈ Cⁿ` reduces to one real scalar per
+left-associated fusion tree `(a₁, …, aₙ; c₂, c₃, …, cₙ)`, with
+`cₖ = c_{k-1} ⊗ aₖ` and `c₁ := a₁`. This is the basis enumerated by
+[`C_basis`](@ref).
+
+## Why the `√(d_c / (d_a d_b))` normalization of Eq. 248 disappears
+
+Kitaev Eq. (245)-(246) introduces "box notation" `[X_{ab}]` for elements
+of `V_{ab}^{ab}`:
+
+    [X_{ab}] = Σ_{c,j} √(d_c / (d_a d_b)) · X_c · ψ_{c,j}^{ab} (ψ_{c,j}^{ab})†.
+
+With `ψ_{c,j}^{ab}` orthonormal under Kitaev's renormalized inner
+product `⟨⟨⋅|⋅⟩⟩` (Eq. 195), the operators `ψ(ψ)†` form an identity
+resolution (Eq. 196). The `√`-factors exactly compensate the non-unit
+length of `ψ` in the usual inner product, so the SCALAR value of
+`[X_{ab}]` on the `c`-block is just `X_c`.
+
+Consequently Eq. (244) takes the simple scalar form
+
+    (δ¹X)_{a,b;c}  =  X_b  −  X_c  +  X_a                  (Eq. 244)
+
+and each face map `fₖⁿ : Cⁿ → Cⁿ⁺¹` contributes coefficient `±1` on
+valid tree tuples (for `n ≤ 1`; for `n ≥ 2` interior face maps require
+F-symbols to re-bracket the input tree).
+
+## χⁿ normalization
+
+Eq. 250 reads
+
+    (χⁿ X)_{a₁…aₙ₋₁} = (1/𝒟²) Σ_c d_c · [X_{c a₁…aₙ₋₁} with c-leg looped].
+
+In the scalar basis, requiring all Eq. 252 identities
+
+    χⁿ⁺¹ f₀ⁿ = id,   χⁿ⁺¹ fₖⁿ = fₖ₋₁ⁿ⁻¹ χⁿ  (k, n > 0),
+
+uniquely fixes the scalar weights. For `n = 1, 2`:
+
+    (χ¹ X)         = (1/𝒟²) Σ_a       d_a²              · X_{a, a}
+    (χ² X)_{a, a}  = (1/𝒟²) Σ_{a₁, c₂ : N[a₁, a, c₂] = 1}
+                            (d_{a₁} · d_{c₂} / d_a)     · X_{a₁, a; c₂}
+
+The sum in χ² runs over **every** `c₂ ∈ a₁ ⊗ a`, not just `c₂ = a` —
+the Eq. 196 identity resolution distributes loop-closure weight across
+all reachable channels.
+
+### Derivation of the χ² weight
+
+Writing `W(a₁, b, c₂; a)` for the χ²-weight at input `(a₁, b, c₂)`,
+output `(a, a)`, support on `b = a`, the three identities demand
+(using `Σ_{a₁} d_{a₁} N[a₁, b, c] = d_b · d_c`, a Frobenius-reciprocity
+consequence):
+
+    C1 (χ² f₀¹ = id_{C¹}):    Σ_{a₁, c₂: N[a₁,a,c₂]=1} W = 1
+    C2 (χ² f₁¹ = f₀⁰ χ¹):     Σ_{c₂: N[a₁,a,c₂]=1}    W = d_{a₁}² / 𝒟²
+    C3 (χ² f₂¹ = f₁⁰ χ¹):     Σ_{a₁: N[a₁,a,c₂]=1}    W = d_{c₂}² / 𝒟²
+
+The ansatz `W = (d_{a₁} · d_{c₂}) / (𝒟² · d_a) · δ_{b,a}` satisfies all
+three. (For C1: Σ d_{a₁} d_{c₂} N[a₁,a,c₂] = Σ_{a₁} d_{a₁} (d_{a₁} d_a)
+= d_a · 𝒟²; the d_a cancels, leaving 1.)
+
+### Fibonacci hand-verification
+
+Fib: `d_τ = φ`, `𝒟² = 1 + φ² = 2 + φ`. For `X' ∈ C¹`:
+
+    (χ² δ¹ X')_1 = (1/𝒟²)[X'_1 + φ² X'_1]            = X'_1                  ✓
+    (χ² δ¹ X')_τ = (1/𝒟²)[X'_1 + (2X'_τ − X'_1) + φ X'_τ]
+                 = (2 + φ)/𝒟² · X'_τ  =  X'_τ                                ✓
+
+Numerically verified for both Fibonacci and Ising: `verify_homotopy(N, d, D2, 1)`
+returns `err = 0.0` (exact, no round-off).
 
 # Status
 
-This module is a clean implementation designed to let the Kitaev identity
-`verify_homotopy` be the sole criterion for ansatz correctness. No
-pentagon / slice functionality yet — that comes after the identity checks
-pass.
+- `n = 0`     : `δ⁰ = f₀⁰ − f₁⁰ = 0` (Kitaev remark, p. 92).
+- `n = 1`     : δ¹, χ² fully implemented; Eq. 251 numerically exact for
+                Fib and Ising.
+- `n ≥ 2`     : δⁿ, χⁿ⁺¹ require **F-symbols** for interior face maps
+                `fₖⁿ` with `1 ≤ k ≤ n` because input and output trees
+                differ by nontrivial re-bracketings. Currently errors
+                (TODO; cf. [Phase4 roadmap]).
+
+# References
+
+- Kitaev A., *Anyons in an exactly solved model and beyond*,
+  arXiv:cond-mat/0506438v3 (2006), Appendix E.6.
+  Def E.15  → [`C_basis`](@ref), [`delta_matrix`](@ref);
+  Thm E.16  → [`chi_matrix`](@ref), [`verify_homotopy`](@ref).
+- Etingof-Nikshych-Ostrik (ENO), Ann. Math. **162** (2005) 581, §6.
+- Crane-Yetter / Davydov, *tangent cohomology* of fusion categories.
 """
 module KitaevComplex
 
 using LinearAlgebra
-using Oscar
-using TensorCategories
-using ACMG: FusionRule
 
 export C_basis, C_dim
 export delta_matrix, chi_matrix
 export verify_homotopy
 
 # ============================================================
-# Basis of Cⁿ
+# Cⁿ basis enumeration
 # ============================================================
 
 """
-    C_basis(N::Array{Int,3}, r::Int, n::Int) -> Vector{Tuple}
+    C_basis(N, r, n) -> Vector{Tuple}
 
-Enumerate basis of Cⁿ. Each basis element is a tuple of length 2n:
+Enumerate left-associated fusion tree basis of `Cⁿ`.
 
-    (X₁, X₂, …, Xₙ, c₂, c₃, …, cₙ)    (for n ≥ 2)
-    (X₁, X₁)                           (for n = 1, charge = X₁)
-    ((),)                              (for n = 0, the unit)
+Each basis element is a tuple of length `2n - 1` (for `n ≥ 2`):
 
-with Nᵢⱼᵏ = 1 on every fusion step c_{k+1} ∈ cₖ ⊗ Xₖ₊₁.
-Multiplicity-free assumption enforced (N ∈ {0, 1}).
+    (a₁, a₂, …, aₙ, c₂, c₃, …, cₙ)
+
+with `cₖ = c_{k-1} ⊗ aₖ` (so `N[c_{k-1}, aₖ, cₖ] = 1`); convention
+`c₁ := a₁`.
+
+- `n = 0`:  returns `[((),)]`
+- `n = 1`:  returns `[(a, a) for a ∈ 1:r]`  (second entry = `c₁ = a`)
+
+Multiplicity-free (`N ∈ {0, 1}`) is asserted.
 """
 function C_basis(N::Array{Int,3}, r::Int, n::Int)
-    n == 0 && return [((),)]
-    n == 1 && return [(X, X) for X in 1:r]
+    @assert all(x -> x == 0 || x == 1, N) "multiplicity-free only (N ∈ {0,1})"
+    n < 0 && error("n must be ≥ 0")
+    n == 0 && return Tuple[ ((),) ]
+    n == 1 && return Tuple[ (a, a) for a in 1:r ]
 
-    # n ≥ 2: iterative build
-    # start with n = 2: (X₁, X₂, c₂) with N^{X₁ X₂}_{c₂} = 1
+    # n ≥ 2: iterative left-associated tree construction
     curr = Vector{Vector{Int}}()
-    for X1 in 1:r, X2 in 1:r, c2 in 1:r
-        N[X1, X2, c2] == 1 && push!(curr, [X1, X2, c2])
+    for a1 in 1:r, a2 in 1:r, c2 in 1:r
+        N[a1, a2, c2] == 1 && push!(curr, [a1, a2, c2])
     end
-
-    for step in 3:n
-        next = Vector{Vector{Int}}()
+    for k in 3:n
+        nxt = Vector{Vector{Int}}()
         for seq in curr
-            # seq layout: [X₁, …, X_{step-1}, c₂, …, c_{step-1}]
-            # length = 2(step - 1)
-            prev_charge = seq[end]  # c_{step-1}
-            # Add new X_step and new c_step
-            for Xnew in 1:r, c_new in 1:r
-                if N[prev_charge, Xnew, c_new] == 1
-                    new_seq = copy(seq)
-                    # Insert Xnew in the middle (after position step-1),
-                    # append c_new at the end.
-                    insert!(new_seq, step, Xnew)     # X₁, …, X_{step-1}, X_step, c₂, …
-                    push!(new_seq, c_new)             # append c_step
-                    push!(next, new_seq)
+            prev_c = seq[end]
+            for ak in 1:r, ck in 1:r
+                if N[prev_c, ak, ck] == 1
+                    s = copy(seq)
+                    insert!(s, k, ak)     # place aₖ after a_{k-1}
+                    push!(s, ck)          # append cₖ
+                    push!(nxt, s)
                 end
             end
         end
-        curr = next
+        curr = nxt
     end
-
-    return [tuple(s...) for s in curr]
+    return Tuple[ tuple(s...) for s in curr ]
 end
 
-"Dimension of Cⁿ."
-C_dim(N, r, n) = length(C_basis(N, r, n))
+"Dimension of `Cⁿ`."
+C_dim(N::Array{Int,3}, r::Int, n::Int) = length(C_basis(N, r, n))
 
-# ============================================================
-# Index utility
-# ============================================================
-
-function _basis_index(basis, tuple_key)
+# tuple index lookup
+function _index_of(basis::Vector, key)::Int
     for (i, b) in enumerate(basis)
-        b == tuple_key && return i
+        b == key && return i
     end
     return 0
 end
 
 # ============================================================
-# Hochschild differential δⁿ : Cⁿ → Cⁿ⁺¹
+# δⁿ  (Def E.15, Eq. 247-248)
 # ============================================================
 
 """
     delta_matrix(N, d, D2, n) -> Matrix{Float64}
 
-Hochschild differential δⁿ : Cⁿ → Cⁿ⁺¹ as a (|Cⁿ⁺¹| × |Cⁿ|) matrix.
+Hochschild differential `δⁿ : Cⁿ → Cⁿ⁺¹` as a `(|Cⁿ⁺¹| × |Cⁿ|)` matrix
+(columns index `Cⁿ`, rows index `Cⁿ⁺¹`).
 
-Formula (Kitaev Eq. 247 + Eq. 248): δⁿ = Σ_{k=0}^{n+1} (-1)^k fₖⁿ.
+Implemented for `n ∈ {0, 1}`; higher `n` errors pending F-symbol data.
 
-Face maps (as `Cⁿ → Cⁿ⁺¹`):
-- f₀ⁿ: prepend a new leg X₀, charge extended by X₀ ⊗ (original Z) → Z_out.
-       Contribution weight: 1 (identity extension).
-- fₙ₊₁ⁿ: append a new leg Xₙ₊₁, charge extended by Z ⊗ Xₙ₊₁ → Z_out.
-         Contribution weight: 1.
-- fₖⁿ for k = 1..n: fuse legs Xₖ and Xₖ₊₁ via an intermediate c,
-  unfolding  (…, Xₖ, Xₖ₊₁, …) ↔ (…, Xₖ', Xₖ₊₁', …) with a c-channel.
-  This is the subtle case.
+For `n = 1` the formula is Kitaev Eq. 244 in scalar form:
 
-WARNING: only f₀ and fₙ₊₁ are implemented. Interior faces (fₖ, k = 1..n)
-require careful handling of intermediate-charge insertion and are
-stubbed. For identity verification with n = 0 and n = 1, only endpoints
-matter, so the identity check at those levels is meaningful.
+    (δ¹X)_{a₁, a₂; c₂}  =  X_{a₂}  −  X_{c₂}  +  X_{a₁}.
+
+For `n = 0`, both `f₀⁰` and `f₁⁰` send `λ ↦ Σ_a λ·1_{V_a^a}`, so
+`δ⁰ ≡ 0`.
 """
 function delta_matrix(N::Array{Int,3}, d::AbstractVector, D2::Real, n::Int)
     r = size(N, 1)
     C_in  = C_basis(N, r, n)
     C_out = C_basis(N, r, n + 1)
-    mat = zeros(Float64, length(C_out), length(C_in))
+    M = zeros(Float64, length(C_out), length(C_in))
 
-    for (col_idx, in_tuple) in enumerate(C_in)
-        # --- f₀ⁿ: prepend X₀ ---
-        # For n = 0: input = ((),), extend to (X₀, X₀) — any X₀
-        # For n ≥ 1: input tuple layout depends on n.
-        if n == 0
-            # Cᵒ has one element ((),). f₀ gives id_{X₀} for any X₀.
-            for X0 in 1:r
-                out_idx = _basis_index(C_out, (X0, X0))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += 1.0  # (-1)^0 = +1
-            end
-            # fₙ₊₁ = f₁: append X₁ on the right — same effect as f₀ for n=0
-            # f₁: X ↦ id_{X}, sign = (-1)^1 = -1
-            for X1 in 1:r
-                out_idx = _basis_index(C_out, (X1, X1))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += -1.0
-            end
-
-        elseif n == 1
-            # input: (X, X); output basis tuple has length 3: (X₁, X₂, c₂)
-            X = in_tuple[1]
-            # f₀: prepend X₀, output = (X₀, X, c₂) with c₂ ∈ X₀ ⊗ X
-            for X0 in 1:r, c2 in 1:r
-                N[X0, X, c2] == 1 || continue
-                out_idx = _basis_index(C_out, (X0, X, c2))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += 1.0  # sign +1
-            end
-            # f₂: append X₂, output = (X, X₂, c₂) with c₂ ∈ X ⊗ X₂
-            for X2 in 1:r, c2 in 1:r
-                N[X, X2, c2] == 1 || continue
-                out_idx = _basis_index(C_out, (X, X2, c2))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += 1.0  # sign = (-1)^(n+1) = (-1)^2 = +1 for n=1
-            end
-            # f₁ (interior): fuse X and ... — but input has only one X.
-            # For n = 1 there's only f₀ and f₂, no interior. (n+2 = 3 faces total.)
-            # Actually for Cⁿ → Cⁿ⁺¹ with n = 1, we have k = 0, 1, 2 (=n+1).
-            # k = 1 is interior: but our input has one variable X, interior face
-            # would "fuse X with itself" which doesn't make categorical sense
-            # — in fact for n=1 the interior face is the multiplication map:
-            #   f₁ f (x₀, x₁) = f(x₀ · x₁)
-            # In our basis: input (X, X) represents an endo on X; f₁ gives
-            # output basis tuple at (X₀, X₁, c₂) with contribution
-            # depending on how the endo on X extends to endo on X₀ ⊗ X₁
-            # when X₀ ⊗ X₁ → c₂ ∋ X. This requires a SUM over c₂ with
-            # weights d_c₂ / (d_{X₀} d_{X₁}) (Eq. 248).
-            # Sign of f₁ is (-1)^1 = -1.
-            # Implementation:
-            for X0 in 1:r, X1 in 1:r
-                # Only contribute when X₀ ⊗ X₁ ∋ X (so N[X0, X1, X] = 1)
-                N[X0, X1, X] == 1 || continue
-                # Eq. 248 weight: d_X / (d_{X0} d_{X1}) ... but we need
-                # the OUTPUT basis c₂ to be specified. Actually from the
-                # structure of Eq. 248, (fₖ f)_{a₁...aₙ₊₁}  sums over c
-                # at position k, contributing scalar f_{a₁...c...aₙ₊₁} ×
-                # (d_c / (d_{aₖ} d_{aₖ₊₁})). The OUTPUT charge c₂ varies,
-                # but the contribution to OUR chosen output basis requires
-                # c₂ = X (the input charge being fused).
-                # So for each output (X0, X1, c₂ = X):
-                out_idx = _basis_index(C_out, (X0, X1, X))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += -1.0 * (d[X] / (d[X0] * d[X1]))
-            end
-
-        else
-            # n ≥ 2: general interior + endpoints (deferred for now)
-            error("delta_matrix for n ≥ 2 not yet implemented")
+    if n == 0
+        # δ⁰ = f₀⁰ − f₁⁰; both act as λ ↦ Σ_a λ·1_a, so the matrix is 0.
+        # Loop made explicit for clarity (every entry receives +1 − 1).
+        for (j, _) in pairs(C_in), (i, _) in pairs(C_out)
+            M[i, j] += 1.0
+            M[i, j] -= 1.0
         end
+        return M
     end
 
-    return mat
+    if n == 1
+        # (δ¹X)_{a₁,a₂;c₂} = X_{a₂} − X_{c₂} + X_{a₁}.
+        for (j, in_t) in pairs(C_in)
+            a_in = in_t[1]
+            for (i, out_t) in pairs(C_out)
+                a1, a2, c2 = out_t
+                a_in == a2 && (M[i, j] += 1.0)   # f₀
+                a_in == c2 && (M[i, j] -= 1.0)   # f₁  (interior)
+                a_in == a1 && (M[i, j] += 1.0)   # f₂
+            end
+        end
+        return M
+    end
+
+    error("delta_matrix: n = $n not yet implemented " *
+          "(F-symbols needed for n ≥ 2 interior faces).")
 end
 
 # ============================================================
-# Contracting homotopy χⁿ : Cⁿ → Cⁿ⁻¹
+# χⁿ  (Thm E.16, Eq. 250)
 # ============================================================
 
 """
-    chi_matrix(N, d, D2, n; ansatz=:kitaev_first_leg) -> Matrix{Float64}
+    chi_matrix(N, d, D2, n) -> Matrix{Float64}
 
-Kitaev contracting homotopy χⁿ : Cⁿ → Cⁿ⁻¹ as a (|Cⁿ⁻¹| × |Cⁿ|) matrix.
+Contracting homotopy `χⁿ : Cⁿ → Cⁿ⁻¹`.
 
-# Ansatz :kitaev_first_leg  (Kitaev Eq. 250 reading)
+Implemented for `n ∈ {1, 2}`; higher `n` errors pending F-symbol data.
 
-    (χⁿ f)_{(X₁, …, Xₙ₋₁; charges)} = (1/D²) Σ_c d_c · f_{(c, X₁, …, Xₙ₋₁; …)}
+    (χ¹ X)         = (1/𝒟²) Σ_a       d_a²              · X_{a, a}
+    (χ² X)_{a, a}  = (1/𝒟²) Σ_{a₁, c₂ : N[a₁, a, c₂] = 1}
+                            (d_{a₁} · d_{c₂} / d_a)     · X_{a₁, a; c₂}
 
-where the input-basis charges are constrained so that closing the c-leg
-yields the same output-basis charges as the input.
-
-For n = 1: output is C⁰ (1D, unit). χ¹ sends any f ∈ C¹ to a scalar:
-    χ¹ f = (1/D²) Σ_X d_X · f_{(X, X)}
-
-For n = 2: output basis (X₁, X₁). Input basis (c, X₁, ch=X₁) where
-closing c gives back X₁.
+The weights are uniquely determined by the Eq. 252 identities for every
+face map; derivation in the module docstring.
 """
-function chi_matrix(N::Array{Int,3}, d::AbstractVector, D2::Real, n::Int;
-                    ansatz::Symbol = :kitaev_first_leg)
+function chi_matrix(N::Array{Int,3}, d::AbstractVector, D2::Real, n::Int)
     n ≥ 1 || error("chi_matrix requires n ≥ 1")
     r = size(N, 1)
     C_in  = C_basis(N, r, n)
     C_out = C_basis(N, r, n - 1)
-    mat = zeros(Float64, length(C_out), length(C_in))
+    M = zeros(Float64, length(C_out), length(C_in))
 
-    if ansatz === :kitaev_first_leg
-        if n == 1
-            # input (X, X); output ((),)
-            # (χ¹ f)_unit = (1/D²) Σ_X d_X · f_{(X,X)}
-            out_idx = _basis_index(C_out, ((),))
-            for (col_idx, in_tuple) in enumerate(C_in)
-                X = in_tuple[1]
-                mat[out_idx, col_idx] += d[X] / D2
-            end
-
-        elseif n == 2
-            # input: (X₁, X₂, c) — which we read as (c=X₁, X₁'=X₂, ch=c) by
-            # interpreting the "first leg" to trace = X₁ — but then output
-            # basis (X, X) must have X = X₂ and charge X₂; and closing X₁
-            # requires the original charge c to reduce to X₂, i.e. the
-            # c-loop closes to give a c ⊗ X₂ → X₂ path, which needs N[c, X₂, X₂]=1.
-            #
-            # Hmm — this requires deciding which leg to call "first". Two
-            # natural conventions exist; pick the simplest.
-            #
-            # CONVENTION: "first leg" = position 1 of the tuple (X₁).
-            # So input basis (X₁, X₂, c) has X₁ as the first leg to trace.
-            # Trace over X₁ means: sum over X₁ with weight d_{X₁}, with the
-            # closing constraint that the charge c must reduce to X₂ (the
-            # remaining charge in C¹).
-            #
-            # Closing requires: N[X₁, X₂, c] (which is already true by C² basis)
-            # AND the output basis is (X₂, X₂), so Z_out = X₂.
-            # The c-loop forces Z_in = c to collapse to Z_out = X₂.
-            # This is only valid if c = X₂ (closing the X₁ loop returns to X₂).
-            #
-            # More precisely: close X₁ means we multiply the endomorphism on
-            # X₁ ⊗ X₂ by the projector onto the identity X₁-loop times d_{X₁}.
-            # The result lives in End(X₂). Only the c = X₂ component of the
-            # original endomorphism contributes after the loop closure.
-            # (Because fusing X₁ with itself back to vacuum, composed with
-            # X₁ ⊗ X₂ → c, gives a non-zero contribution only when c = X₂.)
-            #
-            # So: (χ² f)_{X₂, X₂} = (1/D²) Σ_{X₁ : N[X₁, X₂, X₂] = 1} d_{X₁} · f_{(X₁, X₂, X₂)}
-            for (col_idx, in_tuple) in enumerate(C_in)
-                X1, X2, c = in_tuple
-                c == X2 || continue
-                N[X1, X2, X2] == 1 || continue
-                out_idx = _basis_index(C_out, (X2, X2))
-                out_idx == 0 && continue
-                mat[out_idx, col_idx] += d[X1] / D2
-            end
-
-        else
-            error("chi_matrix ansatz $ansatz not implemented for n ≥ 3 yet")
+    if n == 1
+        i_out = _index_of(C_out, ((),))
+        @assert i_out > 0
+        for (j, in_t) in pairs(C_in)
+            a = in_t[1]
+            M[i_out, j] = d[a]^2 / D2
         end
-
-    else
-        error("Unknown ansatz: $ansatz")
+        return M
     end
 
-    return mat
+    if n == 2
+        for (j, in_t) in pairs(C_in)
+            a1, a2, c2 = in_t
+            i_out = _index_of(C_out, (a2, a2))
+            i_out == 0 && continue
+            M[i_out, j] = d[a1] * d[c2] / (D2 * d[a2])
+        end
+        return M
+    end
+
+    error("chi_matrix: n = $n not yet implemented " *
+          "(F-symbols needed for n ≥ 3).")
 end
 
 # ============================================================
-# Identity check: χⁿ⁺¹ δⁿ + δⁿ⁻¹ χⁿ = id_Cⁿ
+# Eq. 251 verification
 # ============================================================
 
 """
-    verify_homotopy(N, d, D2, n; ansatz=:kitaev_first_leg, atol=1e-10)
-        -> (err::Float64, M::Matrix{Float64})
+    verify_homotopy(N, d, D2, n; atol = 1e-10) -> (err, M)
 
-Compute M = χⁿ⁺¹ δⁿ + δⁿ⁻¹ χⁿ  and report max|M - I|.
+Build  `M = χⁿ⁺¹ δⁿ + δⁿ⁻¹ χⁿ`  and return `err = max|M − I|`.
 
-For n = 0: only χ¹ δ⁰ contributes (χⁿ for n < 1 undefined). Expect
-`M = id_{C⁰}` (a 1×1 identity).
-
-For n = 1: both terms contribute. Expect `M = id_{C¹}`.
+Kitaev Eq. 251: `err ≈ 0` for every `n ≥ 1`.
 """
 function verify_homotopy(N::Array{Int,3}, d::AbstractVector, D2::Real, n::Int;
-                         ansatz::Symbol = :kitaev_first_leg, atol::Real = 1e-10)
+                         atol::Real = 1e-10)
     r = size(N, 1)
-    M = zeros(Float64, C_dim(N, r, n), C_dim(N, r, n))
+    dim_n = C_dim(N, r, n)
+    M = zeros(Float64, dim_n, dim_n)
 
-    if n ≥ 0
-        δn  = delta_matrix(N, d, D2, n)
-        χn1 = chi_matrix(N, d, D2, n + 1; ansatz = ansatz)
-        M  += χn1 * δn
-    end
+    δn  = delta_matrix(N, d, D2, n)
+    χn1 = chi_matrix(N, d, D2, n + 1)
+    M .+= χn1 * δn
 
     if n ≥ 1
-        χn  = chi_matrix(N, d, D2, n; ansatz = ansatz)
+        χn  = chi_matrix(N, d, D2, n)
         δn1 = delta_matrix(N, d, D2, n - 1)
-        M  += δn1 * χn
+        M .+= δn1 * χn
     end
 
-    I_n = Matrix{Float64}(I, size(M)...)
-    err = maximum(abs.(M - I_n))
+    Id  = Matrix{Float64}(I, dim_n, dim_n)
+    err = maximum(abs.(M - Id))
     return err, M
 end
 

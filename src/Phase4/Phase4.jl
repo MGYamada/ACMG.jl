@@ -77,12 +77,12 @@ export pentagon_residuals, hexagon_residuals
 export extract_R_block, block_positions_R
 export ribbon_residuals, VerifyReport, verify_mtc
 
-# KitaevComplex (Kitaev 2006 App E.6 tangent cohomology + slice)
-export KitaevCx, build_kitaev_complex, build_complex
-export Cn_dim, Cn_basis
+# KitaevComplex (Kitaev 2006 App E.6 tangent cohomology)
+# Scalar-level implementation for multiplicity-free fusion categories.
+# Currently complete for n = 0, 1; n ≥ 2 awaits F-symbol integration
+# for the interior face maps fₖⁿ (1 ≤ k ≤ n).
+export C_basis, C_dim
 export delta_matrix, chi_matrix
-export verify_homotopy, verify_complex
-export slice_constraint, kernel_chi
-export tangent_cohomology_dims
+export verify_homotopy
 
 end # module Phase4
