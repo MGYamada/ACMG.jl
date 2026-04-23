@@ -12,4 +12,5 @@ using Test
     include("test_phase4_fibonacci.jl")
     include("test_phase4_lift.jl")
     include("test_phase4_verify.jl")
+    include("test_phase5.jl")
 end
