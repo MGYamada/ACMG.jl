@@ -381,6 +381,7 @@ function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCand
                 size(c.S_Fp, 1) == nrow || continue
                 size(c.S_Fp, 2) == ncol || continue
                 saw_comparable = true
+                local any_sign_ok = false
                 for sgn in trial_signs
                     if branch_sign_setter !== nothing && sgn !== nothing
                         branch_sign_setter(p, sgn)
@@ -397,7 +398,7 @@ function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCand
                                   for i in 1:nrow, j in 1:ncol])
                         reconstruct_matrix_in_Z_sqrt_d(matrix_by_prime, scale_d;
                                                        bound = reconstruction_bound, sqrtd_fn = sqrtd_fn)
-                        return :compatible
+                        any_sign_ok = true
                     catch
                         continue
                     finally
@@ -406,6 +407,7 @@ function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCand
                         end
                     end
                 end
+                any_sign_ok && return :compatible
             end
         end
         return saw_comparable ? :incompatible : :no_comparable

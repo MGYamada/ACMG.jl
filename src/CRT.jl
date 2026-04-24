@@ -206,6 +206,7 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
 
             best_match = nothing
             best_sign = nothing
+            best_score = typemax(Int)
             for c in cands
                 # Different fusion tensor → skip
                 # unit_index may legitimately differ across primes for
@@ -241,10 +242,22 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
                             matrix_by_prime, scale_d;
                             bound = reconstruction_bound,
                             sqrtd_fn = sqrtd_fn)
-                        # Success!
-                        best_match = c
-                        best_sign = sgn
-                        break
+                        # Success: score by coefficient size to prefer the
+                        # most "integral-small" reconstruction.
+                        score = 0
+                        for entry in recon
+                            score += abs(entry[1]) + abs(entry[2])
+                        end
+                        if score < best_score ||
+                           (score == best_score && best_sign !== nothing && sgn !== best_sign)
+                            best_match = c
+                            best_sign = sgn
+                            best_score = score
+                        elseif score == best_score && best_sign === nothing
+                            best_match = c
+                            best_sign = sgn
+                            best_score = score
+                        end
                     catch
                         # Not compatible with this candidate/sign; try next
                         continue
