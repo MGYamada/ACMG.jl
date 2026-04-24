@@ -8,9 +8,8 @@ sweep + CRT reconstruction, and pentagon/hexagon `(F, R)` solution.
 Top-level pipeline (Phase 5):
 
     using ACMG
-    classified = classify_mtcs_at_conductor(24; max_rank = 5,
-                                             primes = [73, 97, 193, 241],
-                                             skip_FR = true)
+    auto = classify_mtcs_auto(24; skip_FR = true)
+    classified = auto.classified
 
 returns a `Vector{ClassifiedMTC}`, one per Galois sector per stratum.
 
@@ -38,6 +37,7 @@ Module organisation (all at ACMG top level — no submodules):
 - Verify:              pentagon / hexagon / ribbon residuals,
                        `VerifyReport`, `verify_mtc`           [Phase 4]
 - Phase5:              end-to-end driver `classify_mtcs_at_conductor`,
+                       auto wrapper `classify_mtcs_auto`,
                        `compute_FR_from_ST`, `classify_from_group`,
                        and the `ClassifiedMTC` output type    [Phase 5]
 """
@@ -141,6 +141,7 @@ export ribbon_residuals, VerifyReport, verify_mtc
 
 # Phase 5: end-to-end pipeline
 export ClassifiedMTC
-export compute_FR_from_ST, classify_from_group, classify_mtcs_at_conductor
+export compute_FR_from_ST, classify_from_group
+export classify_mtcs_at_conductor, classify_mtcs_auto
 
 end # module ACMG
