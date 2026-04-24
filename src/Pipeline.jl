@@ -358,6 +358,8 @@ _is_reconstruction_unstable_message(msg::AbstractString) = begin
            occursin("crt", low)
 end
 
+_galois_unit_residues(N::Int) = [a for a in 1:N if gcd(a, N) == 1]
+
 function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCandidate}},
                                       anchor_prime::Int,
                                       scale_d::Int,
@@ -771,11 +773,13 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
     if !require_ribbon_match && fr_result.n_matches == 0
         verbose && println("  Phase 4: ribbon matching disabled; accepted min-residual solution")
     end
+    fr_result === nothing && error(
+        "Phase 4 found no ribbon-matching (F,R) solution across all T Galois branches; last=$last_phase4_summary")
 
     return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
                          scale_d, scale_factor,
                          used, fresh, verify_fresh,
-                         S_ℂ, T_ℂ,
+                         S_ℂ, T_for_phase4,
                          fr_result.F, fr_result.R, fr_result.report,
                          galois_sector)
 end
