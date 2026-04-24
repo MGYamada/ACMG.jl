@@ -586,18 +586,7 @@ function _extract_orthogonality_points(gb_data, n::Int, p::Int)
     vars = gb_data.vars
 
     # Try several Oscar entry points (version-dependent).
-    candidates = Any[]
-    for fname in (:rational_points, :variety, :points)
-        if isdefined(Oscar, fname)
-            f = getproperty(Oscar, fname)
-            try
-                pts = f(I)
-                pts === nothing || push!(candidates, pts)
-            catch
-            end
-        end
-    end
-
+    candidates = _collect_points_from_ideal(I)
     isempty(candidates) && return nothing
 
     mats = Matrix{Int}[]
@@ -610,6 +599,66 @@ function _extract_orthogonality_points(gb_data, n::Int, p::Int)
         end
     end
 
+    isempty(mats) && return nothing
+    return _dedupe_matrices(mats)
+end
+
+function _collect_points_from_ideal(I)
+    candidates = Any[]
+    for fname in (:rational_points, :variety, :points)
+        if isdefined(Oscar, fname)
+            f = getproperty(Oscar, fname)
+            try
+                pts = f(I)
+                pts === nothing || push!(candidates, pts)
+            catch
+            end
+        end
+    end
+    return candidates
+end
+
+function _coerce_point_to_block_matrix(point, varsU, n_block::Int, p::Int)
+    vals = Int[]
+    for v in varsU
+        entry = _point_entry(point, v)
+        entry === nothing && return nothing
+        local intval
+        try
+            intval = Int(entry)
+        catch
+            return nothing
+        end
+        push!(vals, mod(intval, p))
+    end
+
+    M = zeros(Int, n_block, n_block)
+    t = 1
+    for i in 1:n_block
+        for j in 1:n_block
+            M[i, j] = vals[t]
+            t += 1
+        end
+    end
+    return M
+end
+
+function _extract_U_blocks_from_verlinde_system(sys, p::Int)
+    candidates = _collect_points_from_ideal(sys.ideal)
+    isempty(candidates) && return nothing
+
+    nvars_u = length(sys.varsU)
+    n_block = isqrt(nvars_u)
+    n_block * n_block == nvars_u || return nothing
+    mats = Matrix{Int}[]
+    for pts in candidates
+        if pts isa AbstractVector
+            for pt in pts
+                M = _coerce_point_to_block_matrix(pt, sys.varsU, n_block, p)
+                M === nothing || push!(mats, M)
+            end
+        end
+    end
     isempty(mats) && return nothing
     return _dedupe_matrices(mats)
 end
@@ -928,7 +977,8 @@ Default 3 is feasible at p = 73-100; raising to 4 would take hours.
 - `:exhaustive`: Cayley+reflection sweep
 
 In `:groebner` mode, the driver also performs a best-effort Gröbner
-system warmup for block-U + unit-axiom constraints before enumeration.
+system warmup for block-U + unit-axiom constraints and attempts direct
+U-block point extraction before falling back to enumeration.
 """
 function find_mtcs_at_prime(catalog::Vector{AtomicIrrep}, stratum::Stratum,
                             p::Int; verlinde_threshold::Int = 3,
@@ -978,16 +1028,23 @@ function find_mtcs_at_prime(catalog::Vector{AtomicIrrep}, stratum::Stratum,
         "Naive enumeration would be O(p^$(div(n_block*(n_block-1), 2))). " *
         "Increase max_block_dim if you really want to proceed.")
 
+    U_blocks = Matrix{Int}[]
     if search_mode == :groebner
         try
-            _warmup_verlinde_groebner!(S_atomic, indices_deg, p)
+            sys = _warmup_verlinde_groebner!(S_atomic, indices_deg, p)
+            gb_u_blocks = _extract_U_blocks_from_verlinde_system(sys, p)
+            if gb_u_blocks !== nothing && !isempty(gb_u_blocks)
+                U_blocks = gb_u_blocks
+            end
         catch err
             @warn "Verlinde Gröbner warmup failed; continuing with candidate enumeration" exception = (err, catch_backtrace())
         end
     end
 
-    # Enumerate U_blocks via selected search backend
-    U_blocks = enumerate_block_candidates(n_block, p, search_mode)
+    # Enumerate U_blocks via selected search backend if solver extraction was empty
+    if isempty(U_blocks)
+        U_blocks = enumerate_block_candidates(n_block, p, search_mode)
+    end
 
     candidates = MTCCandidate[]
     for U_block in U_blocks
