@@ -718,13 +718,25 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
                                                 N = N,
                                                 zeta_Fp = zeta_Fp,
                                                 scale = scale_factor)
+    recon_S_phase4 = recon_S
+
+    # TensorCategories assumes the unit object is at index 1.
+    # MTCCandidate stores `unit_index` explicitly and may keep a different
+    # basis ordering; permute all lifted data coherently before Phase 4.
+    if rep.unit_index != 1
+        perm = vcat(rep.unit_index, [i for i in 1:length(T_ℂ) if i != rep.unit_index])
+        S_ℂ = S_ℂ[perm, perm]
+        T_ℂ = T_ℂ[perm]
+        Nijk = Nijk[perm, perm, perm]
+        recon_S_phase4 = recon_S[perm, perm]
+    end
 
     # -------- Phase 4: (F, R) solve + verify --------
     rank = size(Nijk, 1)
 
     if skip_FR
         return ClassifiedMTC(N, N_input, rank, stratum, Nijk,
-                             recon_S, scale_d, scale_factor,
+                             recon_S_phase4, scale_d, scale_factor,
                              used, fresh, verify_fresh,
                              S_ℂ, T_ℂ, nothing, nothing, nothing,
                              galois_sector)
@@ -738,7 +750,7 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
     fr_result.F === nothing && error(
         "Phase 4 found no ribbon-matching (F,R) solution for this candidate")
 
-    return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S,
+    return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
                          scale_d, scale_factor,
                          used, fresh, verify_fresh,
                          S_ℂ, T_ℂ,
