@@ -59,7 +59,7 @@ using ACMG
             (5, 2) (9, 1)
         ]
 
-        encode_entry(pair, s, p, two_s_inv) = mod((pair[1] + pair[2] * s) * two_s_inv, p)
+        encode_entry = (pair, s, p, two_s_inv) -> mod((pair[1] + pair[2] * s) * two_s_inv, p)
         good_anchor_S = [encode_entry(good_x[i, j], s_anchor, p_anchor, two_s_anchor_inv) for i in 1:2, j in 1:2]
         good_other_S = [encode_entry(good_x[i, j], s_other, p_other, two_s_other_inv) for i in 1:2, j in 1:2]
         bad_anchor_S = [encode_entry(bad_x[i, j], s_anchor, p_anchor, two_s_anchor_inv) for i in 1:2, j in 1:2]
@@ -125,14 +125,48 @@ using ACMG
         @test selector.branch_sign_getter(p_other) == -1
     end
 
-    @testset "regression: N=5, scale_d=5, primes=[41,61], rank-2 is not dropped as single-prime sector" begin
-        classified = ACMG.classify_mtcs_at_conductor(5;
-                                                     max_rank = 2,
-                                                     primes = [41, 61],
-                                                     scale_d = 5,
-                                                     skip_FR = true,
-                                                     verbose = false)
+    @testset "regression: N=5, scale_d=5, primes=[41,61] keeps rank-2 sector on both primes" begin
+        d = 5
+        p_anchor = 41
+        p_other = 61
+        selector = ACMG.build_sqrtd_selector(d, [p_anchor, p_other], p_anchor; verbose = false)
 
-        @test any(c -> c.rank == 2 && length(c.used_primes) >= 2, classified)
+        N2 = zeros(Int, 2, 2, 2)
+        for i in 1:2
+            N2[i, i, i] = 1
+        end
+
+        x = [
+            (3, 1) (0, 1)
+            (0, 1) (2, -1)
+        ]
+        s_anchor = selector.sqrtd_fn(d, p_anchor)
+        s_other_true = mod(-selector.sqrtd_fn(d, p_other), p_other)  # force opposite branch
+        two_s_anchor_inv = invmod(mod(2 * s_anchor, p_anchor), p_anchor)
+        two_s_other_inv = invmod(mod(2 * s_other_true, p_other), p_other)
+
+        encode_entry = (pair, s, p, two_s_inv) -> mod((pair[1] + pair[2] * s) * two_s_inv, p)
+        S_anchor = [encode_entry(x[i, j], s_anchor, p_anchor, two_s_anchor_inv) for i in 1:2, j in 1:2]
+        S_other = [encode_entry(x[i, j], s_other_true, p_other, two_s_other_inv) for i in 1:2, j in 1:2]
+
+        c_anchor = ACMG.MTCCandidate(p_anchor, :dummy, S_anchor,
+                                     [1, 1], 1, N2, [1, 1], 2)
+        c_other = ACMG.MTCCandidate(p_other, :dummy, S_other,
+                                    [1, 1], 1, N2, [1, 1], 2)
+        results = Dict(p_anchor => [c_anchor], p_other => [c_other])
+
+        contradictory = ACMG._branch_consistency_precheck(results, p_anchor, d, selector.sqrtd_fn;
+                                                          branch_sign_getter = selector.branch_sign_getter,
+                                                          branch_sign_setter = selector.branch_sign_setter,
+                                                          verbose = false)
+        @test isempty(contradictory)
+
+        groups = ACMG.group_mtcs_galois_aware(results, p_anchor;
+                                              scale_d = d,
+                                              sqrtd_fn = selector.sqrtd_fn,
+                                              branch_sign_getter = selector.branch_sign_getter,
+                                              branch_sign_setter = selector.branch_sign_setter)
+        @test length(groups) == 1
+        @test length(groups[1]) == 2
     end
 end
