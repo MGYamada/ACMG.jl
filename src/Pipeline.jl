@@ -1,8 +1,7 @@
 """
-    Phase 5: End-to-end pipeline driver `N → List[ClassifiedMTC]`.
+    End-to-end pipeline driver `N → List[ClassifiedMTC]`.
 
-Given a conductor `N`, `classify_mtcs_at_conductor` executes the full
-Phase 0 → 1 → 2 → 3 → 4 pipeline and returns a list of fully classified
+Given a conductor `N`, `classify_mtcs_at_conductor` executes the full pipeline and returns a list of fully classified
 MTCs, each carrying:
 
 - the SL(2, ℤ/N) stratum (m_λ) decomposition (Phase 0/1),
