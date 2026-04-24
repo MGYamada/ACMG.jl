@@ -20,19 +20,13 @@ result = compute_FR_from_ST(Nijk, T)
 # result.report :: VerifyReport   pentagon/hexagon/ribbon residuals < 1e-14
 ```
 
-At the top level, the recommended entry point is
-`classify_mtcs_auto(N; ...)`, which runs all five phases and
-auto-selects `conductor_mode`, `scale_d`, `primes`, and `max_rank`
-from built-in candidate lists:
+At the top level, the recommended entry point is now
+`classify_mtcs_at_conductor(N; ...)`. You can call it with only `N`,
+and the pipeline auto-selects `N_effective`, `primes`, and default
+search parameters:
 
 ```julia
-auto = classify_mtcs_auto(24; skip_FR = true)
-classified = auto.classified
-
-# reproducibility metadata chosen by the auto loop
-auto.N_effective
-auto.scale_d
-auto.primes
+mtcs = classify_mtcs_at_conductor(24; skip_FR = true)
 ```
 
 Under the hood this calls `classify_mtcs_at_conductor(N; ...)`:
@@ -60,7 +54,10 @@ with pentagon, hexagon and ribbon residuals.
 ## `conductor_mode` (v0.5.0)
 
 - `conductor_mode = :full_mtc` is the only supported mode.
-- Internal search uses `N_effective = lcm(N, 4 * scale_d)`.
+- Internal search uses
+  `N_effective = lcm(N, cyclotomic_requirement(scale_d))`, where
+  `cyclotomic_requirement(2|3)=24`, `cyclotomic_requirement(5)=5`,
+  else `1` (so in many cases `N_effective = N`).
 - `conductor_mode = :T_only` was removed in v0.5.0.
 
 ## Installation
@@ -102,8 +99,8 @@ and performs:
 1. Pentagon HC on `Nijk` — returns 4 F-solutions, split into 2
    gauge classes.
 2. For each F: hexagon HC — each pentagon solution yields 2 R-solutions.
-3. Ribbon match `(R^{ij}_k)² = θ_i θ_j / θ_k` against the input `T`
-   picks the `(F, R)` pair(s) realising that specific modular datum.
+3. Computes ribbon residuals `(R^{ij}_k)² = θ_i θ_j / θ_k` against the
+   input `T` and chooses the minimum-residual `(F, R)` pair.
 
 ```julia
 result = compute_FR_from_ST(Nijk, T_fib; ribbon_atol = 1e-8, verbose = true)
@@ -124,7 +121,8 @@ recognition.
 
 As a sanity check, running the same fusion ring against a bogus
 `T = (1, i)` — a semion-like twist not consistent with the Fibonacci
-pentagon class — returns zero ribbon matches:
+pentagon class — yields zero ribbon matches (`n_matches == 0`), while
+still returning the minimum-residual `(F,R)` candidate for diagnostics:
 
 ```julia
 compute_FR_from_ST(Nijk, ComplexF64[1.0, im]).n_matches    # == 0
@@ -138,15 +136,21 @@ compute_FR_from_ST(Nijk, ComplexF64[1.0, im]).n_matches    # == 0
 - On the `classify_mtcs_at_conductor(N; ...)` side:
   - You are searching candidates that satisfy consistency conditions for the **full MTC (including the S-field)** starting from `N`.
   - Under `conductor_mode = :full_mtc`, the internal search uses
-    `N_effective = lcm(N, 4 * scale_d)`, so the search conductor may differ
+    `N_effective = lcm(N, cyclotomic_requirement(scale_d))`, so the search conductor may differ
     from the conductor seen from `T` alone.
+  - In practice for Fibonacci, the pipeline-side base conductor should be taken as `N = 20`
+    (while the input twist conductor is still `N_T = 5`).
 
 If you want explicit control, a typical call that reaches Fibonacci from
-`N = 5` is:
+`N = 20` is:
 
 ```julia
-mtcs = classify_mtcs_at_conductor(
-    5;
+# Fully automatic from base conductor N
+mtcs = classify_mtcs_at_conductor(20; scale_d = 5)
+
+# Or explicit control (optional):
+mtcs_explicit = classify_mtcs_at_conductor(
+    20;
     max_rank = 2,
     primes = [41, 61],
     conductor_mode = :full_mtc,
@@ -220,7 +224,7 @@ reconstruction as the matching criterion — a construction not present
 in NRWW but necessary once you compute in F_p rather than a global
 number field.
 
-### Pentagon / Hexagon / Ribbon
+### Pentagon / Hexagon / modular-data consistency
 
 Phase 4 takes `(S, T)` in ℂ and a fusion tensor `Nijk`, and returns
 `(F, R)` symbols satisfying:
@@ -231,12 +235,13 @@ Phase 4 takes `(S, T)` in ℂ and a fusion tensor `Nijk`, and returns
 - **Hexagon**: `hexagon_equations(Nijk, one_vec, F)` (ACMG's own
   implementation with F baked in and the `R·S = I` constraint) →
   HC again.
-- **Ribbon match**: the multiplicity-free relation
+- **Ribbon residual diagnostic**: the multiplicity-free relation
   `(R^{ij}_k)² = θ_i · θ_j / θ_k`
-  is a necessary condition pinning down which `(F, R)` realises the
-  target T. Different pentagon F-classes on the same fusion ring
-  give different MTCs; the ribbon check selects the one matching the
-  input T.
+  is evaluated for all hexagon solutions, and the minimum-residual pair
+  is selected.
+- **Modular-data roundtrip check**: from `(F, R, N)` we evaluate
+  consistency of reproduced modular data `(S, T)` against the Phase 3
+  lifted target `(S, T)` up to cyclotomic Galois action (diagnostic log).
 
 ## Pipeline anatomy
 
@@ -292,7 +297,7 @@ implemented.
 - `verify_reconstruction(recon, candidate, d)`: validates the lift
   against a fresh prime.
 
-### Phase 4 — Pentagon + Hexagon + Ribbon verify
+### Phase 4 — Pentagon + Hexagon + modular-data verify
 
 Six files, all at `src/` top level:
 
@@ -322,15 +327,14 @@ scores < 1e-10 across all three.
 `Pipeline.jl`.
 
 - `compute_FR_from_ST(Nijk, T; ...)`: solve pentagon via HC, solve
-  hexagon for each F, select `(F, R)` whose ribbon residual vs. `T`
-  is below `ribbon_atol`. Returns a NamedTuple with the matched pair
-  and a `VerifyReport`.
+  hexagon for each F, select `(F, R)` with minimum ribbon residual vs.
+  `T`. Returns a NamedTuple with the selected pair and a `VerifyReport`.
 - `classify_from_group(group, N, stratum, primes; ...)`: CRT + ℂ-lift
   + Phase 4, producing one `ClassifiedMTC`.
-- `classify_mtcs_at_conductor(N; max_rank, primes, ...)`: full driver,
+- `classify_mtcs_at_conductor(N; max_rank = 5, primes = nothing, ...)`: full driver,
   iterating over strata and Galois sectors.
   - Note: using an incorrect `scale_d` can produce **zero candidates**.
-    For Fibonacci (`N = 5`), we recommend `scale_d = 5`.
+    For Fibonacci conductor search (`N = 20`), we recommend `scale_d = 5`.
 
 ## Output type
 
