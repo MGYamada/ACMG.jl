@@ -107,6 +107,17 @@ end
 #  classify_mtcs_auto: user-friendly auto-parameter wrapper
 # ============================================================
 
+cyclotomic_requirement(scale_d::Int) =
+    (scale_d == 2 || scale_d == 3) ? 24 :
+    scale_d == 5 ? 5 : 1
+
+function compute_effective_conductor(N::Int, scale_d::Int;
+                                     conductor_mode::Symbol = :full_mtc)
+    conductor_mode == :full_mtc ||
+        error("conductor_mode=:$(conductor_mode) was removed in v0.5.0. Use :full_mtc.")
+    return lcm(N, cyclotomic_requirement(scale_d))
+end
+
 """
     classify_mtcs_auto(N::Int;
                        max_rank_candidates = [2, 3, 4, 5],
@@ -137,7 +148,7 @@ users who do not want to manually specify `max_rank`, `primes`,
 `scale_d`, and `conductor_mode`. It now performs a stage-wise search
 over `d_candidates`, where each stage sets:
 
-`N_eff_candidate = lcm(N, 4d)`.
+`N_eff_candidate = compute_effective_conductor(N, d)`.
 
 For each previously unseen `N_eff_candidate`, the driver tries
 `(conductor_mode, scale_d, max_rank)` combinations at each effective
@@ -186,6 +197,7 @@ function classify_mtcs_auto(N::Int;
                             max_block_dim::Int = 3,
                             reconstruction_bound::Int = 50,
                             ribbon_atol::Float64 = 1e-8,
+                            require_ribbon_match::Bool = false,
                             skip_FR::Bool = false,
                             verbose::Bool = true)
     N >= 1 || error("N must be positive, got $N")
@@ -216,7 +228,7 @@ function classify_mtcs_auto(N::Int;
     end
 
     for d in d_candidates
-        N_eff_candidate = lcm(N, 4 * d)
+        N_eff_candidate = compute_effective_conductor(N, d)
         if N_eff_candidate > N_eff_max
             push!(history, (d = d, N_effective = N_eff_candidate, executed = false,
                             success = false, reason = "N_eff_max_exceeded",
@@ -245,14 +257,7 @@ function classify_mtcs_auto(N::Int;
             for scale_d in scale_d_candidates
                 attempts >= max_attempts && break
 
-                cyclo_req = if scale_d == 2 || scale_d == 3
-                    24
-                elseif scale_d == 5
-                    5
-                else
-                    1
-                end
-                req = lcm(N_eff_candidate, cyclo_req)
+                req = lcm(N_eff_candidate, cyclotomic_requirement(scale_d))
 
                 local chosen_primes
                 try
@@ -286,6 +291,7 @@ function classify_mtcs_auto(N::Int;
                                                             max_block_dim = max_block_dim,
                                                             reconstruction_bound = reconstruction_bound,
                                                             ribbon_atol = ribbon_atol,
+                                                            require_ribbon_match = require_ribbon_match,
                                                             skip_FR = skip_FR,
                                                             verbose = verbose)
 
@@ -459,6 +465,7 @@ end
 
 """
     compute_FR_from_ST(Nijk, T_complex; ribbon_atol = 1e-8,
+                        require_ribbon_match = true,
                         pentagon_slice = 1, show_progress = false,
                         verbose = false)
         -> NamedTuple{(:F, :R, :report, :n_pentagon, :n_tried, :n_matches,
@@ -480,7 +487,7 @@ Algorithm:
    - For each R solution, compute ribbon residuals against `T_complex`;
      keep the `(F, R)` pair with the smallest ribbon residual below
      `ribbon_atol`.
-4. Return the best match (or all-`nothing` fields if none found).
+4. Return the best match.
 
 Caveats:
 - Pentagon HC is feasible only for small fusion rings (~10 F-variables
@@ -499,10 +506,15 @@ Returns a NamedTuple with:
 - `n_tried`:      total `(F, R)` pairs examined
 - `n_matches`:    how many of those passed ribbon
 - `f_idx`, `r_idx`: indices of the chosen pair (0 if none)
+
+If `require_ribbon_match = true`, `(F,R)` is returned as `nothing` when
+no candidate satisfies `ribbon_atol`. If false, the minimum-ribbon-
+residual `(F,R)` is returned.
 """
 function compute_FR_from_ST(Nijk::Array{Int, 3},
                             T_complex::Vector{ComplexF64};
                             ribbon_atol::Float64 = 1e-8,
+                            require_ribbon_match::Bool = true,
                             pentagon_slice::Int = 1,
                             show_progress::Bool = false,
                             verbose::Bool = false)
@@ -531,14 +543,11 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
     try
         _R, eqs, n = get_pentagon_system(Nijk, r)
     catch err
-        # Pointed / trivially-pentagon fusion rings at r ≥ 2 can also
-        # emit no non-trivial equations. Treat this as "no pentagon
-        # constraint; fall through with trivial F" rather than error.
-        verbose && println("  get_pentagon_system threw ($err); " *
-                           "treating as trivially pointed")
-        return (F = nothing, R = nothing, report = nothing,
-                n_pentagon = 0, n_tried = 0, n_matches = 0,
-                f_idx = 0, r_idx = 0)
+        msg = sprint(showerror, err)
+        if occursin("Object not rigid", msg)
+            error("fusion ring is not rigid at rank $r; rejecting candidate")
+        end
+        rethrow(err)
     end
     verbose && println("  Pentagon: $n variables, $(length(eqs)) equations")
 
@@ -593,15 +602,20 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
             if rib_max < ribbon_atol
                 best = (; best..., n_matches = best.n_matches + 1)
-                if rib_max < best.ribbon_max
-                    rep = verify_mtc(F, R, Nijk; T = T_complex)
-                    best = (; best...,
-                            F = F, R = R, report = rep,
-                            f_idx = fi, r_idx = ri,
-                            ribbon_max = rib_max)
-                end
+            end
+            if rib_max < best.ribbon_max
+                rep = verify_mtc(F, R, Nijk; T = T_complex)
+                best = (; best...,
+                        F = F, R = R, report = rep,
+                        f_idx = fi, r_idx = ri,
+                        ribbon_max = rib_max)
             end
         end
+    end
+
+    if require_ribbon_match && best.n_matches == 0
+        best = (; best..., F = nothing, R = nothing, report = nothing,
+                f_idx = 0, r_idx = 0)
     end
 
     # Drop the internal ribbon_max field from the public return
@@ -623,6 +637,7 @@ end
                         galois_sector = 1,
                         test_primes = nothing,
                         ribbon_atol = 1e-8,
+                        require_ribbon_match = false,
                         skip_FR = false,
                         verbose = false)
         -> ClassifiedMTC
@@ -651,6 +666,10 @@ Arguments:
                                      primes; remaining are fresh.
 - `ribbon_atol::Float64 = 1e-8`:     tolerance for the Phase 4 ribbon
                                      match.
+- `require_ribbon_match::Bool=false`: if true, reject candidates with
+                                     no ribbon match below
+                                     `ribbon_atol`; if false, accept
+                                     minimum-ribbon-residual `(F,R)`.
 - `skip_FR::Bool = false`:           if true, only do Phase 0–3 and leave
                                      (F, R) as `nothing`. Useful for
                                      rank/complexity beyond the pentagon
@@ -669,6 +688,7 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
                              galois_sector::Int = 1,
                              test_primes::Union{Vector{Int}, Nothing} = nothing,
                              ribbon_atol::Float64 = 1e-8,
+                             require_ribbon_match::Bool = false,
                              skip_FR::Bool = false,
                              verbose::Bool = false)
     group_primes = sort(collect(keys(group)))
@@ -717,34 +737,42 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
                                                 N = N,
                                                 zeta_Fp = zeta_Fp,
                                                 scale = scale_factor)
+    recon_S_phase4 = recon_S
+
+    # TensorCategories assumes the unit object is at index 1.
+    # MTCCandidate stores `unit_index` explicitly and may keep a different
+    # basis ordering; permute all lifted data coherently before Phase 4.
+    if rep.unit_index != 1
+        perm = vcat(rep.unit_index, [i for i in 1:length(T_ℂ) if i != rep.unit_index])
+        S_ℂ = S_ℂ[perm, perm]
+        T_ℂ = T_ℂ[perm]
+        Nijk = Nijk[perm, perm, perm]
+        recon_S_phase4 = recon_S[perm, perm]
+    end
 
     # -------- Phase 4: (F, R) solve + verify --------
     rank = size(Nijk, 1)
 
     if skip_FR
         return ClassifiedMTC(N, N_input, rank, stratum, Nijk,
-                             recon_S, scale_d, scale_factor,
+                             recon_S_phase4, scale_d, scale_factor,
                              used, fresh, verify_fresh,
                              S_ℂ, T_ℂ, nothing, nothing, nothing,
                              galois_sector)
     end
     verbose && println("  running pentagon/hexagon on rank=$rank...")
 
-    local fr_result
-    try
-        fr_result = compute_FR_from_ST(Nijk, T_ℂ;
-                                        ribbon_atol = ribbon_atol,
-                                        verbose = verbose)
-    catch err
-        verbose && println("  Phase 4 failed: $err")
-        return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S,
-                             scale_d, scale_factor,
-                             used, fresh, verify_fresh,
-                             S_ℂ, T_ℂ, nothing, nothing, nothing,
-                             galois_sector)
+    fr_result = compute_FR_from_ST(Nijk, T_ℂ;
+                                   ribbon_atol = ribbon_atol,
+                                   require_ribbon_match = require_ribbon_match,
+                                   verbose = verbose)
+    fr_result.F === nothing && error(
+        "Phase 4 found no ribbon-matching (F,R) solution for this candidate")
+    if !require_ribbon_match && fr_result.n_matches == 0
+        verbose && println("  Phase 4: ribbon matching disabled; accepted min-residual solution")
     end
 
-    return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S,
+    return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
                          scale_d, scale_factor,
                          used, fresh, verify_fresh,
                          S_ℂ, T_ℂ,
@@ -757,14 +785,16 @@ end
 # ============================================================
 
 """
-    classify_mtcs_at_conductor(N; max_rank, primes, strata = nothing,
+    classify_mtcs_at_conductor(N; max_rank = 5, primes = nothing, strata = nothing,
                                 scale_d = 3, scale_factor = 2,
                                 conductor_mode = :full_mtc,
+                                min_primes = 4, prime_start = 29, prime_window = 2000,
                                 sqrtd_fn = nothing,
                                 verlinde_threshold = 3,
                                 max_block_dim = 3,
                                 reconstruction_bound = 50,
                                 ribbon_atol = 1e-8,
+                                require_ribbon_match = false,
                                 skip_FR = false,
                                 verbose = true)
         -> Vector{ClassifiedMTC}
@@ -787,7 +817,9 @@ as `nothing` (useful for large ranks where pentagon HC is infeasible).
 Note on conductor: `N` is an input indicator (typically the T-order
 conductor). Internally, the pipeline searches at `N_effective`
 determined by `conductor_mode`; `:full_mtc` uses
-`N_effective = lcm(N, 4*scale_d)`. An MTC's S-matrix may
+`N_effective = lcm(N, cyclotomic_requirement(scale_d))` where
+`cyclotomic_requirement(2|3)=24`, `cyclotomic_requirement(5)=5`, else `1`.
+An MTC's S-matrix may
 live in a larger cyclotomic field than ℚ(ζ_N); in NRWW's convention the
 full MTC conductor is `max(cond(S), cond(T))`. Fibonacci, for example,
 has `cond(T) = 5` but its S involves `D = √(2+φ)` which is NOT in ℚ(ζ_5).
@@ -797,8 +829,11 @@ only when `N_effective` is large enough to accommodate `S` too.
 Arguments:
 - `N::Int`:                        input conductor indicator. Internal
                                    search runs at `N_effective`.
-- `max_rank::Int`:                 maximum rank to consider
-- `primes::Vector{Int}`:           good primes (must satisfy `N_effective | p-1`).
+- `max_rank::Int = 5`:             maximum rank to consider
+- `primes::Union{Nothing, Vector{Int}} = nothing`:
+                                   good primes (must satisfy `N_effective | p-1`).
+                                   If `nothing`, automatically selected via
+                                   `select_admissible_primes(N_effective; ...)`.
                                    Split automatically into "used" (first
                                    half) and "fresh" (second half) for
                                    CRT + cross-validation. Minimum 4
@@ -822,9 +857,15 @@ Arguments:
 - `conductor_mode::Symbol = :full_mtc`:
                                    interpretation of `N`. In v0.5.0,
                                    only `:full_mtc` is supported, using
-                                   `N_effective = lcm(N, 4*scale_d)` so
+                                   `N_effective = lcm(N, cyclotomic_requirement(scale_d))`
+                                   (typically equal to `N`) so
                                    S-side field constraints are
                                    conservatively included.
+- `min_primes::Int = 4`:           when `primes = nothing`, number of
+                                   admissible primes to auto-select.
+- `prime_start::Int = 29`:         when `primes = nothing`, start of
+                                   prime search range (exclusive).
+- `prime_window::Int = 2000`:      when `primes = nothing`, scan width.
 - `sqrtd_fn`:                      custom √d-in-F_p function. If
                                    `nothing` (default), chooses:
                                    cyclotomic variant for `scale_d ∈
@@ -852,45 +893,66 @@ Arguments:
 - `reconstruction_bound::Int = 50`: coefficient bound for ℤ[√d]
                                    rational reconstruction.
 - `ribbon_atol::Float64 = 1e-8`:   Phase 4 ribbon-match tolerance.
+- `require_ribbon_match::Bool = false`:
+                                   if true, reject candidates unless
+                                   a ribbon-matching `(F,R)` pair is
+                                   found within `ribbon_atol`. If false
+                                   (default), accept the minimum-ribbon-
+                                   residual `(F,R)` solution.
 - `skip_FR::Bool = false`:         skip Phase 4. Useful if
                                    `max_rank ≥ 5` and pentagon HC would
                                    blow up.
 - `verbose::Bool = true`:          print per-phase progress.
 """
 function classify_mtcs_at_conductor(N::Int;
-                                    max_rank::Int,
-                                    primes::Vector{Int},
+                                    max_rank::Int = 5,
+                                    primes::Union{Nothing, Vector{Int}} = nothing,
                                     strata::Union{Nothing, Vector{Stratum}} = nothing,
                                     scale_d::Int = 3,
                                     scale_factor::Int = 2,
                                     conductor_mode::Symbol = :full_mtc,
+                                    min_primes::Int = 4,
+                                    prime_start::Int = 29,
+                                    prime_window::Int = 2000,
                                     sqrtd_fn = nothing,
                                     verlinde_threshold::Int = 3,
                                     max_block_dim::Int = 3,
                                     reconstruction_bound::Int = 50,
                                     ribbon_atol::Float64 = 1e-8,
+                                    require_ribbon_match::Bool = false,
                                     skip_FR::Bool = false,
                                     verbose::Bool = true)
     user_sqrtd_fn = sqrtd_fn
-    conductor_mode == :full_mtc ||
-        error("conductor_mode=:$(conductor_mode) was removed in v0.5.0. Use :full_mtc.")
-    N_effective = lcm(N, 4 * scale_d)
+    N_effective = compute_effective_conductor(N, scale_d;
+                                              conductor_mode = conductor_mode)
+
+    chosen_primes = primes === nothing ?
+        select_admissible_primes(N_effective;
+                                 min_count = min_primes,
+                                 start_from = prime_start,
+                                 window = prime_window) :
+        copy(primes)
 
     verbose && println("Conductor mode: $conductor_mode " *
                        "(input N=$N, N_effective=$N_effective)")
+    verbose && primes === nothing &&
+        println("PrimeSelection: auto-selected primes = $chosen_primes")
 
     # Prime validity check
-    for p in primes
+    for p in chosen_primes
         (p - 1) % N_effective == 0 || error(
             "prime $p does not satisfy N_effective | p-1 " *
             "(input N=$N; N_effective=$N_effective)")
     end
-    length(primes) >= 2 || error(
-        "need at least 2 primes (got $(length(primes)))")
+    length(chosen_primes) >= 2 || error(
+        "need at least 2 primes (got $(length(chosen_primes)))")
 
     # ------- Phase 0: atomic catalog -------
-    verbose && println("=== Phase 0: atomic SL(2, ℤ/$N_effective) irrep catalog ===")
-    catalog = build_atomic_catalog(N_effective; max_rank = max_rank, verbose = false)
+    # Enumerate atomic SL(2, Z/N)-irreps at the user-specified base conductor N.
+    # The field-extension effect is handled later via N_effective in arithmetic
+    # checks (prime admissibility, sqrt(d)-dependent reconstruction).
+    verbose && println("=== Phase 0: atomic SL(2, ℤ/$N) irrep catalog ===")
+    catalog = build_atomic_catalog(N; max_rank = max_rank, verbose = false)
     verbose && println("  $(length(catalog)) atomic irreps (≤ rank $max_rank)")
 
     # ------- Phase 1: strata -------
@@ -901,7 +963,7 @@ function classify_mtcs_at_conductor(N::Int;
     verbose && println("  $(length(strata_list)) strata")
 
     # ------- Phase 2: find MTCs at each prime, for each stratum -------
-    verbose && println("\n=== Phase 2: block-U sweep at primes $primes ===")
+    verbose && println("\n=== Phase 2: block-U sweep at primes $chosen_primes ===")
 
     # Collect (stratum, Dict{p => candidates}) only for strata that yield
     # something at at least one prime.
@@ -912,7 +974,7 @@ function classify_mtcs_at_conductor(N::Int;
         any_found = false
         any_prime_errored = false
         last_err = ""
-        for p in primes
+        for p in chosen_primes
             local cands
             try
                 cands = find_mtcs_at_prime(catalog, st, p;
@@ -1060,6 +1122,7 @@ function classify_mtcs_at_conductor(N::Int;
                                                 galois_sector = gi,
                                                 test_primes = used,
                                                 ribbon_atol = cur_ribbon_atol,
+                                                require_ribbon_match = require_ribbon_match,
                                                 skip_FR = skip_FR,
                                                 verbose = verbose)
                     sector_ok = true
