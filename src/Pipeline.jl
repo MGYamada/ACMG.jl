@@ -648,8 +648,16 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
         verbose && println("    F[$fi]: $(length(R_sols)) hexagon sols")
 
-        for (ri, R) in enumerate(R_sols)
+        for (ri, R_raw) in enumerate(R_sols)
             best = (; best..., n_tried = best.n_tried + 1)
+
+            local R
+            try
+                R = refine_solution_newton(hex_eqs, R_raw; tol = 1e-14)
+            catch err
+                verbose && println("      R[$ri] Newton refinement failed: $err")
+                continue
+            end
 
             local rib_max
             try
@@ -657,6 +665,10 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
                 rib_max = maximum(rib)
             catch err
                 verbose && println("      R[$ri] ribbon failed: $err")
+                continue
+            end
+            if !isfinite(rib_max)
+                verbose && println("      R[$ri] ribbon residual non-finite: $rib_max")
                 continue
             end
 
