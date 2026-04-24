@@ -170,6 +170,48 @@ using ACMG
         @test length(groups[1]) == 2
     end
 
+    @testset "regression: grouping reconstruction_bound controls 2-prime sector creation (d=5, p=41/61)" begin
+        d = 5
+        p_anchor = 41
+        p_other = 61
+        selector = ACMG.build_sqrtd_selector(d, [p_anchor, p_other], p_anchor; verbose = false)
+
+        N1 = zeros(Int, 1, 1, 1)
+        N1[1, 1, 1] = 1
+
+        # x = a + b*√d with a = 6 requires reconstruction_bound ≥ 6.
+        x = (a = 6, b = 0)
+        s_anchor = selector.sqrtd_fn(d, p_anchor)
+        s_other = selector.sqrtd_fn(d, p_other)
+
+        S_anchor = mod((x.a + x.b * s_anchor) * invmod(mod(2 * s_anchor, p_anchor), p_anchor), p_anchor)
+        S_other = mod((x.a + x.b * s_other) * invmod(mod(2 * s_other, p_other), p_other), p_other)
+
+        c_anchor = ACMG.MTCCandidate(p_anchor, :dummy, reshape([S_anchor], 1, 1),
+                                     [1], 1, N1, [1], 1)
+        c_other = ACMG.MTCCandidate(p_other, :dummy, reshape([S_other], 1, 1),
+                                    [1], 1, N1, [1], 1)
+        results = Dict(p_anchor => [c_anchor], p_other => [c_other])
+
+        groups_bound5 = ACMG.group_mtcs_galois_aware(results, p_anchor;
+                                                     scale_d = d,
+                                                     reconstruction_bound = 5,
+                                                     sqrtd_fn = selector.sqrtd_fn,
+                                                     branch_sign_getter = selector.branch_sign_getter,
+                                                     branch_sign_setter = selector.branch_sign_setter)
+        @test length(groups_bound5) == 1
+        @test length(groups_bound5[1]) == 1
+
+        groups_bound6 = ACMG.group_mtcs_galois_aware(results, p_anchor;
+                                                     scale_d = d,
+                                                     reconstruction_bound = 6,
+                                                     sqrtd_fn = selector.sqrtd_fn,
+                                                     branch_sign_getter = selector.branch_sign_getter,
+                                                     branch_sign_setter = selector.branch_sign_setter)
+        @test length(groups_bound6) == 1
+        @test length(groups_bound6[1]) == 2
+    end
+
     @testset "_branch_consistency_precheck honors reconstruction_bound" begin
         d = 3
         p_anchor = 73
