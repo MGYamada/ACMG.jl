@@ -5,7 +5,7 @@ Modular Tensor Category classification by fixing the conductor `N`,
 running an SL(2, ℤ/N) stratum + block-U enumeration, multi-prime F_p
 sweep + CRT reconstruction, and pentagon/hexagon `(F, R)` solution.
 
-Top-level pipeline (Phase 5):
+Top-level pipeline:
 
     using ACMG
     auto = classify_mtcs_auto(24; skip_FR = true)
@@ -17,10 +17,8 @@ Module organisation (all at ACMG top level — no submodules):
 - FpArith:             F_p arithmetic primitives (Tonelli-Shanks,
                        primitive roots, matmul, lift_symmetric, ...)
 - Types:               `ModularDatumFp`, `FusionRule` with axiom validation
-- Dimensions:          quantum dimension enumeration (stub)
 - ModularData:         (S, T) axiom checking over F_p
 - FusionExtract:       Verlinde-based fusion rule extraction
-- Enumerator:          legacy top-level driver (stub)
 - SL2Reps:             SL(2, ℤ/N) irreducible representation catalog
                        (Oscar + GAP/SL2Reps)                  [Phase 0]
 - StratumEnum:         combinatorial partition `Σ m_λ d_λ = r`[Phase 1]
@@ -36,7 +34,7 @@ Module organisation (all at ACMG top level — no submodules):
 - ModularDataLift:     F_p / ℤ[√d] → ℂ lift                   [Phase 4]
 - Verify:              pentagon / hexagon / ribbon residuals,
                        `VerifyReport`, `verify_mtc`           [Phase 4]
-- Phase5:              end-to-end driver `classify_mtcs_at_conductor`,
+- Pipeline:            end-to-end driver `classify_mtcs_at_conductor`,
                        auto wrapper `classify_mtcs_auto`,
                        `compute_FR_from_ST`, `classify_from_group`,
                        and the `ClassifiedMTC` output type    [Phase 5]
@@ -52,17 +50,15 @@ include("FpArith.jl")
 # Modular data and fusion rule types
 include("Types.jl")
 
-# Quantum dimension enumeration
-include("Dimensions.jl")
-
 # (S, T) enumeration over F_p
 include("ModularData.jl")
 
 # Fusion rule extraction
 include("FusionExtract.jl")
 
-# Top-level enumeration driver (legacy)
-include("Enumerator.jl")
+# Legacy stubs intentionally not included in public API surface:
+# - Dimensions.jl
+# - Enumerator.jl
 
 # SL(2, ℤ/N) irrep catalog (Oscar + GAP/SL2Reps) — Phase 0
 include("SL2Reps.jl")
@@ -87,8 +83,8 @@ include("Verify.jl")
 # Prime selection helpers
 include("PrimeSelection.jl")
 
-# Phase 5: end-to-end pipeline driver
-include("Phase5.jl")
+# End-to-end pipeline driver
+include("Pipeline.jl")
 
 # ============================================================
 #  Exports
@@ -142,7 +138,7 @@ export pentagon_residuals, hexagon_residuals
 export extract_R_block, block_positions_R
 export ribbon_residuals, VerifyReport, verify_mtc
 
-# Phase 5: end-to-end pipeline
+# End-to-end pipeline
 export ClassifiedMTC
 export select_admissible_primes
 export compute_FR_from_ST, classify_from_group

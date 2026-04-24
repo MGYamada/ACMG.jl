@@ -315,7 +315,7 @@ scores < 1e-10 across all three.
 
 ### Phase 5 — End-to-end pipeline
 
-`Phase5.jl`.
+`Pipeline.jl`.
 
 - `compute_FR_from_ST(Nijk, T; ...)`: solve pentagon via HC, solve
   hexagon for each F, select `(F, R)` whose ribbon residual vs. `T`
@@ -419,9 +419,9 @@ src/
   FpArith.jl              — F_p primitives
   Types.jl                — ModularDatumFp, FusionRule
   ModularData.jl          — (S, T) axiom validation
-  FusionExtract.jl        — F_p Verlinde → ℤ lift
-  Dimensions.jl           — (stub) quantum dimension enumeration
-  Enumerator.jl           — (stub) legacy top-level driver
+  FusionExtract.jl        — F_p Verlinde → ℤ lift (retained public API)
+  Dimensions.jl           — legacy stub (not included in public ACMG module)
+  Enumerator.jl           — legacy stub (not included in public ACMG module)
   SL2Reps.jl              — Phase 0: Oscar + GAP/SL2Reps catalog
   StratumEnum.jl          — Phase 1: (m_λ) enumeration
   BlockU.jl               — Phase 2: O(n) Cayley + single-prime driver
@@ -432,7 +432,7 @@ src/
   HexagonSolver.jl        — Phase 4: HC for R-system
   ModularDataLift.jl      — Phase 4: F_p / ℤ[√d] → ℂ
   Verify.jl               — Phase 4: residuals, VerifyReport
-  Phase5.jl               — Phase 5: classify_mtcs_at_conductor and friends
+  Pipeline.jl             — end-to-end pipeline: classify_mtcs_at_conductor and friends
 
 test/
   runtests.jl
@@ -444,11 +444,12 @@ test/
   test_blocku.jl            — pure F_p helpers
   test_block_u_general.jl   — general O(n) Cayley
   test_crt.jl               — CRT + ℤ[√d] reconstruction
-  test_phase4_fibonacci.jl  — pentagon + hexagon HC
-  test_phase4_lift.jl       — DiscreteLogTable, T and S lifts
-  test_phase4_verify.jl     — residuals, ribbon match, VerifyReport
-  test_phase5.jl            — Phase 5 pipeline: compute_FR_from_ST
-                              + classify_mtcs_at_conductor smoke test
+  test_fr_pentagon_hexagon_fibonacci.jl  — pentagon + hexagon HC
+  test_modular_data_lift.jl               — DiscreteLogTable, T and S lifts
+  test_verify_residuals.jl                — residuals, ribbon match, VerifyReport
+  test_pipeline_end_to_end.jl             — pipeline end-to-end and FR integration
+  test_pipeline_galois_grouping.jl        — CRT branch consistency + sector grouping
+  test_pipeline_primes.jl                 — prime selection and conductor mode checks
 
 scripts/
   phase5_demo.jl          — Phase 5 end-to-end demo (Fibonacci)
