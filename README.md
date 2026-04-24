@@ -20,8 +20,22 @@ result = compute_FR_from_ST(Nijk, T)
 # result.report :: VerifyReport   pentagon/hexagon/ribbon residuals < 1e-14
 ```
 
-At the top level, `classify_mtcs_at_conductor(N; ...)` runs all five
-phases of the pipeline:
+At the top level, the recommended entry point is
+`classify_mtcs_auto(N; ...)`, which runs all five phases and
+auto-selects `conductor_mode`, `scale_d`, `primes`, and `max_rank`
+from built-in candidate lists:
+
+```julia
+auto = classify_mtcs_auto(24; skip_FR = true)
+classified = auto.classified
+
+# reproducibility metadata chosen by the auto loop
+auto.N_effective
+auto.scale_d
+auto.primes
+```
+
+Under the hood this calls `classify_mtcs_at_conductor(N; ...)`:
 
 ```
  N ─┬─ Phase 0:  Atomic SL(2, ℤ/N)-irreps  (Oscar + GAP/SL2Reps)
@@ -126,8 +140,8 @@ compute_FR_from_ST(Nijk, ComplexF64[1.0, im]).n_matches    # == 0
     `N_effective = lcm(N, 4 * scale_d)`, so the search conductor may differ
     from the conductor seen from `T` alone.
 
-If you use the Issue 1 `conductor_mode`, a typical call that reaches
-Fibonacci from `N = 5` is:
+If you want explicit control, a typical call that reaches Fibonacci from
+`N = 5` is:
 
 ```julia
 mtcs = classify_mtcs_at_conductor(

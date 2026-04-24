@@ -243,4 +243,29 @@ Test strategy:
                                                                                                                           verbose = false)
         @test result isa Vector{ACMG.ClassifiedMTC}
     end
+
+    @testset "classify_mtcs_auto returns reproducibility metadata" begin
+        auto = ACMG.classify_mtcs_auto(1;
+                                       max_rank_candidates = [1],
+                                       scale_d_candidates = [2],
+                                       conductor_modes = [:T_only],
+                                       min_primes = 2,
+                                       prime_start = 3,
+                                       prime_max = 200,
+                                       skip_FR = true,
+                                       verbose = false)
+
+        @test haskey(auto, :classified)
+        @test haskey(auto, :N_effective)
+        @test haskey(auto, :scale_d)
+        @test haskey(auto, :primes)
+        @test haskey(auto, :max_rank)
+        @test auto.N_input == 1
+        @test auto.N_effective == 1
+        @test auto.scale_d == 2
+        @test auto.conductor_mode == :T_only
+        @test auto.max_rank == 1
+        @test length(auto.primes) == 2
+        @test auto.attempts == 1
+    end
 end

@@ -21,6 +21,12 @@ This module also provides two mid-level helpers:
   group from `group_mtcs_galois_aware`, performs Phase 3 CRT + Phase 4
   `(F, R)` solve and returns a single `ClassifiedMTC`.
 
+And one high-level convenience API:
+
+- `classify_mtcs_auto(N; ...)`: automatically chooses
+  `conductor_mode`, `scale_d`, `primes`, and `max_rank` from candidate
+  lists, then runs `classify_mtcs_at_conductor`.
+
 Design notes:
 - The pipeline is conductor-first: `N` is the outer loop; rank emerges
   from stratum enumeration.
@@ -96,6 +102,170 @@ struct ClassifiedMTC
     R_values::Union{Vector{ComplexF64}, Nothing}
     verify_report::Union{VerifyReport, Nothing}
     galois_sector::Int
+end
+
+# ============================================================
+#  classify_mtcs_auto: user-friendly auto-parameter wrapper
+# ============================================================
+
+"""
+    classify_mtcs_auto(N::Int;
+                       max_rank_candidates = [2, 3, 4, 5],
+                       scale_d_candidates = [3, 5, 2],
+                       conductor_modes = [:full_mtc],
+                       min_primes = 4,
+                       prime_start = 29,
+                       prime_max = 2000,
+                       strata = nothing,
+                       scale_factor = 2,
+                       sqrtd_fn = nothing,
+                       verlinde_threshold = 3,
+                       max_block_dim = 3,
+                       reconstruction_bound = 5,
+                       ribbon_atol = 1e-8,
+                       skip_FR = false,
+                       verbose = true)
+        -> NamedTuple
+
+Auto-select wrapper around `classify_mtcs_at_conductor`.
+
+This function is intended as the recommended public entry point for
+users who do not want to manually specify `max_rank`, `primes`,
+`scale_d`, and `conductor_mode`. It performs a deterministic search over
+the candidate lists, and returns both:
+
+1. `classified`: `Vector{ClassifiedMTC}` from the first successful run
+   (or from the final attempted run if no MTC is found),
+2. reproducibility metadata:
+   - `N_input`
+   - `N_effective`
+   - `scale_d`
+   - `conductor_mode`
+   - `primes`
+   - `max_rank`
+   - `attempts`
+
+Prime selection rule for each attempted `(conductor_mode, scale_d)`:
+- `N_effective = N` for `:T_only`, else `lcm(N, 4*scale_d)` for
+  `:full_mtc`.
+- Let `req = lcm(N_effective, cyclotomic_requirement(scale_d))`, where
+  `cyclotomic_requirement(2|3)=24`, `cyclotomic_requirement(5)=5`, else
+  `1`.
+- Choose the first `min_primes` primes `p > prime_start` with
+  `(p - 1) % req == 0`.
+"""
+function classify_mtcs_auto(N::Int;
+                            max_rank_candidates::Vector{Int} = [2, 3, 4, 5],
+                            scale_d_candidates::Vector{Int} = [3, 5, 2],
+                            conductor_modes::Vector{Symbol} = [:full_mtc],
+                            min_primes::Int = 4,
+                            prime_start::Int = 29,
+                            prime_max::Int = 2000,
+                            strata::Union{Nothing, Vector{Stratum}} = nothing,
+                            scale_factor::Int = 2,
+                            sqrtd_fn = nothing,
+                            verlinde_threshold::Int = 3,
+                            max_block_dim::Int = 3,
+                            reconstruction_bound::Int = 5,
+                            ribbon_atol::Float64 = 1e-8,
+                            skip_FR::Bool = false,
+                            verbose::Bool = true)
+    N >= 1 || error("N must be positive, got $N")
+    min_primes >= 2 || error("min_primes must be ≥ 2, got $min_primes")
+    !isempty(max_rank_candidates) || error("max_rank_candidates must be non-empty")
+    !isempty(scale_d_candidates) || error("scale_d_candidates must be non-empty")
+    !isempty(conductor_modes) || error("conductor_modes must be non-empty")
+
+    local last_result = ClassifiedMTC[]
+    local last_meta = (N_input = N, N_effective = N, scale_d = 0,
+                       conductor_mode = :full_mtc, primes = Int[],
+                       max_rank = 0, attempts = 0)
+    attempts = 0
+
+    for conductor_mode in conductor_modes
+        for scale_d in scale_d_candidates
+            N_effective = if conductor_mode == :T_only
+                N
+            elseif conductor_mode == :full_mtc
+                lcm(N, 4 * scale_d)
+            else
+                error("unknown conductor_mode=$conductor_mode. Use :T_only or :full_mtc.")
+            end
+
+            cyclo_req = if scale_d == 2 || scale_d == 3
+                24
+            elseif scale_d == 5
+                5
+            else
+                1
+            end
+            req = lcm(N_effective, cyclo_req)
+
+            chosen_primes = Int[]
+            p = nextprime(prime_start)
+            while p <= prime_max && length(chosen_primes) < min_primes
+                if (p - 1) % req == 0
+                    push!(chosen_primes, p)
+                end
+                p = nextprime(p + 1)
+            end
+            if length(chosen_primes) < min_primes
+                error("unable to find $min_primes primes with p-1 divisible by $req " *
+                      "(N_input=$N, N_effective=$N_effective, scale_d=$scale_d, " *
+                      "search range ($prime_start, $prime_max])")
+            end
+
+            for max_rank in max_rank_candidates
+                attempts += 1
+                verbose && println("AUTO attempt #$attempts: " *
+                                   "mode=$conductor_mode scale_d=$scale_d " *
+                                   "max_rank=$max_rank primes=$chosen_primes")
+
+                classified = classify_mtcs_at_conductor(N;
+                                                        max_rank = max_rank,
+                                                        primes = chosen_primes,
+                                                        strata = strata,
+                                                        scale_d = scale_d,
+                                                        scale_factor = scale_factor,
+                                                        conductor_mode = conductor_mode,
+                                                        sqrtd_fn = sqrtd_fn,
+                                                        verlinde_threshold = verlinde_threshold,
+                                                        max_block_dim = max_block_dim,
+                                                        reconstruction_bound = reconstruction_bound,
+                                                        ribbon_atol = ribbon_atol,
+                                                        skip_FR = skip_FR,
+                                                        verbose = verbose)
+
+                last_result = classified
+                last_meta = (N_input = N,
+                             N_effective = N_effective,
+                             scale_d = scale_d,
+                             conductor_mode = conductor_mode,
+                             primes = copy(chosen_primes),
+                             max_rank = max_rank,
+                             attempts = attempts)
+                if !isempty(classified)
+                    return (classified = classified,
+                            N_input = N,
+                            N_effective = N_effective,
+                            scale_d = scale_d,
+                            conductor_mode = conductor_mode,
+                            primes = copy(chosen_primes),
+                            max_rank = max_rank,
+                            attempts = attempts)
+                end
+            end
+        end
+    end
+
+    return (classified = last_result,
+            N_input = last_meta.N_input,
+            N_effective = last_meta.N_effective,
+            scale_d = last_meta.scale_d,
+            conductor_mode = last_meta.conductor_mode,
+            primes = last_meta.primes,
+            max_rank = last_meta.max_rank,
+            attempts = last_meta.attempts)
 end
 
 function Base.show(io::IO, m::ClassifiedMTC)
@@ -434,6 +604,8 @@ end
         -> Vector{ClassifiedMTC}
 
 Fully automated MTC classification for a given conductor input `N`.
+For a user-friendly wrapper that auto-selects parameters, see
+`classify_mtcs_auto`.
 
 Pipeline:
   Phase 0: build SL(2, ℤ/N) atomic irrep catalog (≤ max_rank)
