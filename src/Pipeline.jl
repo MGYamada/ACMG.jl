@@ -356,6 +356,8 @@ _is_reconstruction_unstable_message(msg::AbstractString) = begin
            occursin("crt", low)
 end
 
+_galois_unit_residues(N::Int) = [a for a in 1:N if gcd(a, N) == 1]
+
 function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCandidate}},
                                       anchor_prime::Int,
                                       scale_d::Int,
@@ -743,17 +745,35 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
     end
     verbose && println("  running pentagon/hexagon on rank=$rank...")
 
-    fr_result = compute_FR_from_ST(Nijk, T_ℂ;
-                                    ribbon_atol = ribbon_atol,
-                                    verbose = verbose)
-
-    fr_result.F === nothing && error(
-        "Phase 4 found no ribbon-matching (F,R) solution for this candidate")
+    # The T-lift from F_p depends on the chosen primitive root and may land
+    # in a Galois-conjugate branch. Retry Phase 4 over cyclotomic Galois
+    # actions θ ↦ θ^a (a ∈ (ℤ/Nℤ)^×) to recover equivalent branches such as
+    # Fibonacci / Yang-Lee pairs.
+    fr_result = nothing
+    T_for_phase4 = T_ℂ
+    local last_phase4_summary
+    last_phase4_summary = "no_attempt"
+    for a in _galois_unit_residues(N)
+        T_trial = a == 1 ? T_ℂ : (T_ℂ .^ a)
+        trial = compute_FR_from_ST(Nijk, T_trial;
+                                   ribbon_atol = ribbon_atol,
+                                   verbose = verbose)
+        if trial.F !== nothing
+            fr_result = trial
+            T_for_phase4 = T_trial
+            verbose && a != 1 &&
+                println("  Phase 4 ribbon match recovered via T ↦ T^$a Galois action")
+            break
+        end
+        last_phase4_summary = "a=$a (n_pent=$(trial.n_pentagon), n_tried=$(trial.n_tried), n_match=$(trial.n_matches))"
+    end
+    fr_result === nothing && error(
+        "Phase 4 found no ribbon-matching (F,R) solution across all T Galois branches; last=$last_phase4_summary")
 
     return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
                          scale_d, scale_factor,
                          used, fresh, verify_fresh,
-                         S_ℂ, T_ℂ,
+                         S_ℂ, T_for_phase4,
                          fr_result.F, fr_result.R, fr_result.report,
                          galois_sector)
 end
