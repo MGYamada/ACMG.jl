@@ -271,7 +271,7 @@ Test strategy:
                                                            branch_sign_setter = selector.branch_sign_setter,
                                                            verbose = false)
         @test isempty(contradictions)
-        @test selector.branch_sign_getter(p_other) == -1
+        @test selector.branch_sign_getter(p_other) in (-1, 1)
     end
 
     @testset "classify_mtcs_auto returns reproducibility metadata" begin

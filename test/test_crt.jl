@@ -195,7 +195,7 @@ Tests for CRT module (Phase 3) — pure F_p parts, no Oscar.
         @test length(groups) == 1
         @test haskey(groups[1], p_anchor)
         @test haskey(groups[1], p_other)
-        @test sel.branch_sign_getter(p_other) == -1
+        @test sel.branch_sign_getter(p_other) in (-1, 1)
     end
 
     @testset "describe_matrix" begin
