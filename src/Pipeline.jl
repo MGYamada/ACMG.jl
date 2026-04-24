@@ -1,8 +1,7 @@
 """
-    Phase 5: End-to-end pipeline driver `N → List[ClassifiedMTC]`.
+    End-to-end pipeline driver `N → List[ClassifiedMTC]`.
 
-Given a conductor `N`, `classify_mtcs_at_conductor` executes the full
-Phase 0 → 1 → 2 → 3 → 4 pipeline and returns a list of fully classified
+Given a conductor `N`, `classify_mtcs_at_conductor` executes the full pipeline and returns a list of fully classified
 MTCs, each carrying:
 
 - the SL(2, ℤ/N) stratum (m_λ) decomposition (Phase 0/1),
@@ -141,10 +140,8 @@ over `d_candidates`, where each stage sets:
 `N_eff_candidate = lcm(N, 4d)`.
 
 For each previously unseen `N_eff_candidate`, the driver tries
-`(conductor_mode, scale_d, max_rank)` combinations (with
-`classify_mtcs_at_conductor` forced to that effective conductor via
-`N = N_eff_candidate, conductor_mode = :T_only`) and records stage
-metadata. Search stops when any of:
+`(conductor_mode, scale_d, max_rank)` combinations at each effective
+conductor and records stage metadata. Search stops when any of:
 
 - no new MTCs for `stagnation_k` consecutive executed stages,
 - `N_eff_candidate > N_eff_max`,
@@ -220,12 +217,6 @@ function classify_mtcs_auto(N::Int;
 
     for d in d_candidates
         N_eff_candidate = lcm(N, 4 * d)
-        if all(m -> m == :T_only, conductor_modes)
-            # Backward-compatible behavior: in T-only mode, effective
-            # conductor stays at the user input N.
-            N_eff_candidate = N
-        end
-
         if N_eff_candidate > N_eff_max
             push!(history, (d = d, N_effective = N_eff_candidate, executed = false,
                             success = false, reason = "N_eff_max_exceeded",
@@ -248,8 +239,8 @@ function classify_mtcs_auto(N::Int;
 
         for conductor_mode in conductor_modes
             attempts >= max_attempts && break
-            conductor_mode == :T_only || conductor_mode == :full_mtc || error(
-                "unknown conductor_mode=$conductor_mode. Use :T_only or :full_mtc.")
+            conductor_mode == :full_mtc || error(
+                "conductor_mode=:$(conductor_mode) was removed in v0.5.0. Use :full_mtc.")
 
             for scale_d in scale_d_candidates
                 attempts >= max_attempts && break
@@ -283,14 +274,13 @@ function classify_mtcs_auto(N::Int;
                                        "mode=$conductor_mode scale_d=$scale_d " *
                                        "max_rank=$max_rank primes=$chosen_primes")
 
-                    call_N = conductor_mode == :T_only ? N : N_eff_candidate
-                    classified = classify_mtcs_at_conductor(call_N;
+                    classified = classify_mtcs_at_conductor(N_eff_candidate;
                                                             max_rank = max_rank,
                                                             primes = chosen_primes,
                                                             strata = strata,
                                                             scale_d = scale_d,
                                                             scale_factor = scale_factor,
-                                                            conductor_mode = :T_only,
+                                                            conductor_mode = conductor_mode,
                                                             sqrtd_fn = sqrtd_fn,
                                                             verlinde_threshold = verlinde_threshold,
                                                             max_block_dim = max_block_dim,
@@ -771,9 +761,8 @@ as `nothing` (useful for large ranks where pentagon HC is infeasible).
 
 Note on conductor: `N` is an input indicator (typically the T-order
 conductor). Internally, the pipeline searches at `N_effective`
-determined by `conductor_mode`; by default this is
-`N_effective = lcm(N, 4*scale_d)` (`:full_mtc`). In `:T_only` mode,
-`N_effective = N` for backward compatibility. An MTC's S-matrix may
+determined by `conductor_mode`; `:full_mtc` uses
+`N_effective = lcm(N, 4*scale_d)`. An MTC's S-matrix may
 live in a larger cyclotomic field than ℚ(ζ_N); in NRWW's convention the
 full MTC conductor is `max(cond(S), cond(T))`. Fibonacci, for example,
 has `cond(T) = 5` but its S involves `D = √(2+φ)` which is NOT in ℚ(ζ_5).
@@ -784,7 +773,7 @@ Arguments:
 - `N::Int`:                        input conductor indicator. Internal
                                    search runs at `N_effective`.
 - `max_rank::Int`:                 maximum rank to consider
-- `primes::Vector{Int}`:           good primes (must satisfy `N | p-1`).
+- `primes::Vector{Int}`:           good primes (must satisfy `N_effective | p-1`).
                                    Split automatically into "used" (first
                                    half) and "fresh" (second half) for
                                    CRT + cross-validation. Minimum 4
@@ -806,15 +795,11 @@ Arguments:
                                    reconstruction (matches
                                    `reconstruct_S_matrix` convention).
 - `conductor_mode::Symbol = :full_mtc`:
-                                   interpretation of `N`.
-                                   `:full_mtc` (default) expands to
+                                   interpretation of `N`. In v0.5.0,
+                                   only `:full_mtc` is supported, using
                                    `N_effective = lcm(N, 4*scale_d)` so
-                                   the S-side field constraints are
+                                   S-side field constraints are
                                    conservatively included.
-                                   `:T_only` keeps legacy behavior
-                                   (`N_effective = N`) and is
-                                   deprecated (scheduled for removal in
-                                   v0.5.0).
 - `sqrtd_fn`:                      custom √d-in-F_p function. If
                                    `nothing` (default), chooses:
                                    cyclotomic variant for `scale_d ∈
@@ -862,17 +847,9 @@ function classify_mtcs_at_conductor(N::Int;
                                     skip_FR::Bool = false,
                                     verbose::Bool = true)
     user_sqrtd_fn = sqrtd_fn
-    N_effective = if conductor_mode == :T_only
-        N
-    elseif conductor_mode == :full_mtc
-        lcm(N, 4 * scale_d)
-    else
-        error("unknown conductor_mode=$conductor_mode. Use :T_only or :full_mtc.")
-    end
-    if conductor_mode == :T_only
-        @warn "conductor_mode=:T_only is deprecated and will be removed in v0.5.0. " *
-              "Use the new default conductor_mode=:full_mtc."
-    end
+    conductor_mode == :full_mtc ||
+        error("conductor_mode=:$(conductor_mode) was removed in v0.5.0. Use :full_mtc.")
+    N_effective = lcm(N, 4 * scale_d)
 
     verbose && println("Conductor mode: $conductor_mode " *
                        "(input N=$N, N_effective=$N_effective)")
