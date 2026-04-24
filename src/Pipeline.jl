@@ -967,7 +967,7 @@ function classify_mtcs_at_conductor(N::Int;
             branch_sign_getter = selector.branch_sign_getter
             branch_sign_setter = selector.branch_sign_setter
         end
-        verbose && println("  d=$scale_d, sqrt-branch mode=$(selector_mode == :custom ? "custom" : String(selector_mode))")
+        verbose && println("  d=$scale_d, sqrt-branch mode=$(selector_mode == :custom ? "custom" : String(selector_mode)), grouping bound=$reconstruction_bound")
 
         contradictory = _branch_consistency_precheck(results_by_prime, anchor, scale_d, active_sqrtd_fn;
                                                      reconstruction_bound = reconstruction_bound,
@@ -1004,6 +1004,7 @@ function classify_mtcs_at_conductor(N::Int;
             try
                 append!(groups, group_mtcs_galois_aware(chunk, anchor;
                                                         scale_d = scale_d,
+                                                        reconstruction_bound = reconstruction_bound,
                                                         sqrtd_fn = active_sqrtd_fn,
                                                         branch_sign_getter = branch_sign_getter,
                                                         branch_sign_setter = branch_sign_setter))
