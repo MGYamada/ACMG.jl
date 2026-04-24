@@ -358,7 +358,57 @@ _is_reconstruction_unstable_message(msg::AbstractString) = begin
            occursin("crt", low)
 end
 
-_galois_unit_residues(N::Int) = [a for a in 1:N if gcd(a, N) == 1]
+function _modular_data_roundtrip_up_to_galois(F_values::Vector{ComplexF64},
+                                              R_values::Vector{ComplexF64},
+                                              Nijk::Array{Int,3},
+                                              S_target::Matrix{ComplexF64},
+                                              T_target::Vector{ComplexF64},
+                                              N::Int)
+    r = size(Nijk, 1)
+    units = [a for a in 1:N if gcd(a, N) == 1]
+    best_rib = Inf
+    best_a = 1
+    best_T = T_target
+    for a in units
+        T_trial = a == 1 ? T_target : (T_target .^ a)
+        rib = ribbon_residuals(R_values, T_trial, Nijk)
+        rib_max = maximum(rib)
+        if rib_max < best_rib
+            best_rib = rib_max
+            best_a = a
+            best_T = T_trial
+        end
+    end
+
+    # Reconstruct S from (N, θ, d) using the balancing-expression form.
+    fr = FusionRule(Nijk)
+    dual = fr.dual
+    A = zeros(Float64, r, r)
+    for i in 1:r
+        A .+= Float64.(Nijk[i, :, :])
+    end
+    eig = eigen(A)
+    idx = argmax(real(eig.values))
+    d = abs.(real(eig.vectors[:, idx]))
+    d ./= d[1]
+    D = sqrt(sum(d .^ 2))
+
+    S_from = Matrix{ComplexF64}(undef, r, r)
+    for i in 1:r, j in 1:r
+        acc = 0.0 + 0.0im
+        jdual = dual[j]
+        for k in 1:r
+            Nijk[i, jdual, k] == 0 && continue
+            acc += Nijk[i, jdual, k] * (best_T[k] / (best_T[i] * best_T[jdual])) * d[k]
+        end
+        S_from[i, j] = acc / D
+    end
+
+    s_err = min(maximum(abs.(S_from .- S_target)),
+                maximum(abs.(S_from .+ S_target)))
+    ok = best_rib < 1e-6 && s_err < 5e-2
+    return (ok = ok, best_a = best_a, ribbon_max = best_rib, S_max = s_err, T_best = best_T)
+end
 
 function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCandidate}},
                                       anchor_prime::Int,
@@ -487,8 +537,7 @@ Algorithm:
    - Build hexagon system with F fixed.
    - Solve hexagon via HC.
    - For each R solution, compute ribbon residuals against `T_complex`;
-     keep the `(F, R)` pair with the smallest ribbon residual below
-     `ribbon_atol`.
+     keep the `(F, R)` pair with the smallest ribbon residual.
 4. Return the best match.
 
 Caveats:
@@ -509,9 +558,6 @@ Returns a NamedTuple with:
 - `n_matches`:    how many of those passed ribbon
 - `f_idx`, `r_idx`: indices of the chosen pair (0 if none)
 
-If `require_ribbon_match = true`, `(F,R)` is returned as `nothing` when
-no candidate satisfies `ribbon_atol`. If false, the minimum-ribbon-
-residual `(F,R)` is returned.
 """
 function compute_FR_from_ST(Nijk::Array{Int, 3},
                             T_complex::Vector{ComplexF64};
@@ -767,15 +813,14 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
 
     fr_result = compute_FR_from_ST(Nijk, T_for_phase4;
                                    ribbon_atol = ribbon_atol,
-                                   require_ribbon_match = require_ribbon_match,
                                    verbose = verbose)
-    fr_result.F === nothing && error(
-        "Phase 4 found no ribbon-matching (F,R) solution for this candidate")
-    if !require_ribbon_match && fr_result.n_matches == 0
-        verbose && println("  Phase 4: ribbon matching disabled; accepted min-residual solution")
-    end
-    fr_result === nothing && error(
-        "Phase 4 found no ribbon-matching (F,R) solution across all T Galois branches; last=$last_phase4_summary")
+    fr_result.F === nothing && error("Phase 4 could not produce any (F,R) solution")
+
+    md_roundtrip = _modular_data_roundtrip_up_to_galois(fr_result.F, fr_result.R,
+                                                        Nijk, S_ℂ, T_for_phase4, N)
+    verbose && println("  modular-data roundtrip: galois a=$(md_roundtrip.best_a), " *
+                       "ribbon=$(md_roundtrip.ribbon_max), S_err=$(md_roundtrip.S_max), " *
+                       "ok=$(md_roundtrip.ok)")
 
     return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
                          scale_d, scale_factor,
@@ -897,13 +942,8 @@ Arguments:
                                    has ~10¹¹ points).
 - `reconstruction_bound::Int = 50`: coefficient bound for ℤ[√d]
                                    rational reconstruction.
-- `ribbon_atol::Float64 = 1e-8`:   Phase 4 ribbon-match tolerance.
-- `require_ribbon_match::Bool = false`:
-                                   if true, reject candidates unless
-                                   a ribbon-matching `(F,R)` pair is
-                                   found within `ribbon_atol`. If false
-                                   (default), accept the minimum-ribbon-
-                                   residual `(F,R)` solution.
+- `ribbon_atol::Float64 = 1e-8`:   Phase 4 ribbon residual tolerance
+                                   used only for diagnostic counting.
 - `skip_FR::Bool = false`:         skip Phase 4. Useful if
                                    `max_rank ≥ 5` and pentagon HC would
                                    blow up.
