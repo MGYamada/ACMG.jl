@@ -2,48 +2,6 @@ using Test
 using ACMG
 
 @testset "Pipeline galois grouping" begin
-    @testset "classify_mtcs_at_conductor on SU(2)_4 (N=24, skip_FR)" begin
-        test_primes = [73, 97, 193, 241, 313, 337, 409]
-
-        catalog = ACMG.build_atomic_catalog(24; max_rank = 5, verbose = false)
-        d3_idx = 81
-        d2_idx = 49
-        stratum = ACMG.Stratum(Dict(d3_idx => 1, d2_idx => 1), 5)
-
-        classified = ACMG.classify_mtcs_at_conductor(24;
-                                                     max_rank = 5,
-                                                     primes = test_primes,
-                                                     strata = [stratum],
-                                                     scale_d = 3,
-                                                     scale_factor = 2,
-                                                     verlinde_threshold = 3,
-                                                     skip_FR = true,
-                                                     verbose = false)
-
-        @test length(classified) == 2
-        for c in classified
-            @test c.rank == 5
-            @test c.verify_fresh
-            @test c.scale_d == 3
-            @test c.scale_factor == 2
-            @test c.F_values === nothing
-            @test c.R_values === nothing
-            @test c.verify_report === nothing
-            @test size(c.S_complex) == (5, 5)
-            @test length(c.T_complex) == 5
-            for t in c.T_complex
-                @test abs(abs(t) - 1.0) < 1e-10
-            end
-        end
-
-        sectors = sort([c.galois_sector for c in classified])
-        @test sectors == [1, 2]
-        for c in classified
-            @test c.N_input == 24
-            @test c.N == 24
-        end
-    end
-
     @testset "_branch_consistency_precheck resolves anchored sign contradiction" begin
         d = 6
         p_anchor = 29

@@ -57,12 +57,11 @@ arithmetic S-matrix in ℤ[√d], its complex-lifted `(S, T)`, the
 `(F, R)` symbols solving pentagon/hexagon over ℂ, and a `VerifyReport`
 with pentagon, hexagon and ribbon residuals.
 
-## Migration note: `conductor_mode`
+## `conductor_mode` (v0.5.0)
 
-- Legacy behavior (compat mode): `conductor_mode = :T_only`
-- New default: `conductor_mode = :full_mtc`
-  - Internal search uses `N_effective = lcm(N, 4 * scale_d)`
-- `:T_only` is kept for backward compatibility, but is **planned for removal in v0.5.0**.
+- `conductor_mode = :full_mtc` is the only supported mode.
+- Internal search uses `N_effective = lcm(N, 4 * scale_d)`.
+- `conductor_mode = :T_only` was removed in v0.5.0.
 
 ## Installation
 
