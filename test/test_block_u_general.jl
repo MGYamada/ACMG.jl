@@ -78,6 +78,30 @@ det_2x2(M) = M[1, 1] * M[2, 2] - M[1, 2] * M[2, 1]
         @test det_neg == length(so2)
     end
 
+    @testset "search backend mode parity" begin
+        p = 11
+        for n in (2, 3)
+            cands_exhaustive = enumerate_block_candidates(n, p, :exhaustive)
+            cands_groebner = enumerate_block_candidates(n, p, :groebner)
+            @test !isempty(cands_groebner)
+            @test length(cands_groebner) >= length(cands_exhaustive)
+        end
+        @test_throws ErrorException enumerate_block_candidates(2, p, :unknown_mode)
+    end
+
+    @testset "verlinde groebner equation builder shape" begin
+        # Pure shape/count sanity using numeric placeholders.
+        # n_block=2 => orthogonality equations: 3
+        # r=2 => inverse witness equations: 2
+        # r=2 => unit axiom equations: 4
+        # total expected = 9
+        varsU = [1, 0, 0, 1]
+        varsW = [1, 1]
+        S = [1 0; 0 1]
+        eqs = build_verlinde_unit_equations(varsU, varsW, S, [1, 2], 11, 1)
+        @test length(eqs) == 9
+    end
+
     @testset "apply_block_U sanity" begin
         # Note: apply_block_U reduces entries mod p. For identity-block test,
         # keep all S entries already in [0, p) so that S and apply_block_U(S,...,I,...)
