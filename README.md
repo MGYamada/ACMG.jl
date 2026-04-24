@@ -78,7 +78,7 @@ ACMG depends on:
 
 Julia ≥ 1.9 required.
 
-Compatibility policy: `[compat]` uses Julia caret semantics (e.g. `1.3`, `0.5`) to keep narrow ranges with explicit major/minor upper bounds.
+Compatibility policy: `[compat]` uses Julia caret semantics (e.g. `1.3`, `0.5`) to keep narrow ranges with explicit major/minor upper bounds. The package version is defined in `Project.toml`.
 
 ## Worked example: Fibonacci
 
