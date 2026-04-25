@@ -748,10 +748,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
             local rep
             try
-                # Ribbon-residual based matching is intentionally no longer
-                # used for candidate selection. Phase 4 now picks an (F,R)
-                # by pentagon/hexagon consistency only; modular-data
-                # roundtrip matching is done afterwards in classify_from_group.
+                # First pass verifies pentagon/hexagon consistency.
                 rep = verify_mtc(F, R_vals, Nijk)
             catch err
                 verbose && println("      R[$ri] verify failed: $err")
@@ -763,15 +760,31 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
                 continue
             end
 
+            rep_with_t = try
+                verify_mtc(F, R_vals, Nijk; T = T_complex)
+            catch
+                rep
+            end
+            ribbon_score = rep_with_t.ribbon_max === nothing ? Inf : rep_with_t.ribbon_max
+
             # Keep counters for API compatibility. n_matches now counts
             # numerically valid pentagon+hexagon candidates.
             best = (; best..., n_matches = best.n_matches + 1)
+
+            # Primary key: pentagon/hexagon residuals.
+            # Tie-breaker: ribbon residual against T_complex so that the
+            # selected (F,R) is consistent with modular data when multiple
+            # hexagon solutions exist (e.g. Fibonacci-like cases).
+            choose = false
             if score < best.score
-                rep_with_t = try
-                    verify_mtc(F, R_vals, Nijk; T = T_complex)
-                catch
-                    rep
-                end
+                choose = true
+            elseif isapprox(score, best.score; atol = 1e-12, rtol = 0.0)
+                best_ribbon = best.report === nothing || best.report.ribbon_max === nothing ?
+                              Inf : best.report.ribbon_max
+                choose = ribbon_score < best_ribbon
+            end
+
+            if choose
                 best = (; best...,
                         F = F, R = R_vals, report = rep_with_t,
                         f_idx = fi, r_idx = ri,
