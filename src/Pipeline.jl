@@ -504,6 +504,9 @@ function _infer_T_candidates_from_monodromy(R_values::Vector{ComplexF64},
             end
             continue
         end
+    end
+    return best
+end
 
         if nextval[pos] >= N
             nextval[pos] = 0
