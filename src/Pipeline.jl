@@ -683,12 +683,17 @@ function compute_FR_from_ST(Nijk::Array{Int,3};
     isempty(kwargs) || error("unsupported keyword arguments: $(collect(keys(kwargs)))")
     ctx = _default_context_from_kwargs(context = context, conductor = conductor, N = N)
     r = size(Nijk, 1)
-    _, pentagon_eqs, nF = get_pentagon_system(Nijk, r)
-    F_solutions = solve_pentagon_modular_crt(pentagon_eqs, nF;
-                                             Nijk = Nijk,
-                                             context = ctx,
-                                             primes = primes,
-                                             show_progress = verbose)
+    known_F = _known_pentagon_solution(Nijk, ctx)
+    F_solutions = if known_F === nothing
+        _, pentagon_eqs, nF = get_pentagon_system(Nijk, r)
+        solve_pentagon_modular_crt(pentagon_eqs, nF;
+                                   Nijk = Nijk,
+                                   context = ctx,
+                                   primes = primes,
+                                   show_progress = verbose)
+    else
+        [known_F]
+    end
     candidates = NamedTuple[]
     for F in F_solutions
         _, hex_eqs, nR = get_hexagon_system(Nijk, r, F; context = ctx)
@@ -1280,6 +1285,7 @@ function classify_mtcs_at_conductor(N::Int;
                                        S = rep.S_cyclotomic,
                                        T = rep.T_cyclotomic,
                                        return_all = true,
+                                       primes = primes,
                                        verbose = verbose)
         fr_result.F === nothing && error("Phase 4 could not produce any (F,R) solution for key=$key")
         isempty(fr_result.candidates) && error("Phase 4 produced no valid (F,R) candidates for key=$key")

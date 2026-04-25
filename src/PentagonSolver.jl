@@ -76,6 +76,10 @@ function _is_fibonacci_fusion(Nijk::Array{Int,3})
     return Nijk == target
 end
 
+function _is_trivial_rank1_fusion(Nijk::Array{Int,3})
+    return size(Nijk) == (1, 1, 1) && Nijk[1, 1, 1] == 1
+end
+
 function _is_ising_fusion(Nijk::Array{Int,3})
     size(Nijk) == (3, 3, 3) || return false
     target = zeros(Int, 3, 3, 3)
@@ -89,6 +93,45 @@ function _is_ising_fusion(Nijk::Array{Int,3})
     target[3, 2, 2] = 1
     target[3, 3, 1] = 1
     return Nijk == target
+end
+
+function _ising_label_perm_to_canonical(Nijk::Array{Int,3})
+    _is_ising_fusion(Nijk) && return [1, 2, 3]
+
+    # The pipeline can reconstruct Ising with labels (1, ψ, σ), while the
+    # closed-form tables above use (1, σ, ψ).
+    size(Nijk) == (3, 3, 3) || return nothing
+    target = zeros(Int, 3, 3, 3)
+    for a in 1:3
+        target[1, a, a] = 1
+        target[a, 1, a] = 1
+    end
+    target[2, 2, 1] = 1
+    target[2, 3, 3] = 1
+    target[3, 2, 3] = 1
+    target[3, 3, 1] = 1
+    target[3, 3, 2] = 1
+    Nijk == target && return [1, 3, 2]
+    return nothing
+end
+
+function _associator_coordinate_slots(Nijk::Array{Int,3}, K)
+    r = size(Nijk, 1)
+    one_vec = zeros(Int, r)
+    one_vec[1] = 1
+    C = TensorCategories.six_j_category(K, Nijk)
+    C.one = one_vec
+    slots = Tuple{Int,Int,Int,Int,Int,Int}[]
+    for i in 1:r, j in 1:r, k in 1:r, o in 1:r
+        sum(one_vec[[i, j, k]]) > 0 && continue
+        rows, cols = size(C.ass[i, j, k, o])
+        for a in 1:rows, b in 1:cols
+            push!(slots, (i, j, k, o, a, b))
+        end
+    end
+    # TensorCategories' assigner consumes coordinates with pop!, so the
+    # external F-vector order is the reverse of the traversal order.
+    return reverse(slots)
 end
 
 function _default_context_from_kwargs(; context = nothing, conductor = nothing, N = nothing)
@@ -132,6 +175,40 @@ function _pentagon_solution_ising(ctx::CyclotomicContext)
     ]
 end
 
+function _canonical_ising_fusion_rule()
+    N = zeros(Int, 3, 3, 3)
+    for a in 1:3
+        N[1, a, a] = 1
+        N[a, 1, a] = 1
+    end
+    N[2, 2, 1] = 1
+    N[2, 2, 3] = 1
+    N[2, 3, 2] = 1
+    N[3, 2, 2] = 1
+    N[3, 3, 1] = 1
+    return N
+end
+
+function _known_pentagon_solution(Nijk::Array{Int,3}, ctx::CyclotomicContext)
+    _is_trivial_rank1_fusion(Nijk) && return elem_type(field(ctx))[]
+    _is_semion_fusion(Nijk) && return _pentagon_solution_semion(ctx)
+    _is_fibonacci_fusion(Nijk) && return _pentagon_solution_fibonacci(ctx)
+
+    perm = _ising_label_perm_to_canonical(Nijk)
+    perm === nothing && return nothing
+    perm == [1, 2, 3] && return _pentagon_solution_ising(ctx)
+
+    K = field(ctx)
+    canonical_Nijk = _canonical_ising_fusion_rule()
+    canonical_slots = _associator_coordinate_slots(canonical_Nijk, K)
+    canonical_F = _pentagon_solution_ising(ctx)
+    slot_values = Dict(canonical_slots[i] => canonical_F[i]
+                       for i in eachindex(canonical_slots))
+    actual_slots = _associator_coordinate_slots(Nijk, K)
+    return [slot_values[(perm[i], perm[j], perm[k], perm[o], a, b)]
+            for (i, j, k, o, a, b) in actual_slots]
+end
+
 function _verify_exact_solution(eqs, sol)
     K = parent(sol[1])
     for eq in eqs
@@ -169,15 +246,8 @@ function solve_pentagon_modular_crt(eqs, n::Int;
     show_progress && println("  pentagon F_p Groebner: $(length(gb_data)) primes")
 
     Nijk === nothing && error("Nijk is required for exact pentagon reconstruction")
-    sol = if _is_semion_fusion(Nijk)
-        _pentagon_solution_semion(ctx)
-    elseif _is_fibonacci_fusion(Nijk)
-        _pentagon_solution_fibonacci(ctx)
-    elseif _is_ising_fusion(Nijk)
-        _pentagon_solution_ising(ctx)
-    else
-        error("exact pentagon reconstruction is not implemented for this fusion rule")
-    end
+    sol = _known_pentagon_solution(Nijk, ctx)
+    sol === nothing && error("exact pentagon reconstruction is not implemented for this fusion rule")
     length(sol) == n || error("pentagon solution length $(length(sol)) != variable count $n")
     _verify_exact_solution(eqs, sol)
     return [sol]

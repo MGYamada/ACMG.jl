@@ -14,7 +14,6 @@ using ACMG
             classified = ACMG.classify_mtcs_at_conductor(case.N;
                                                          max_rank = case.max_rank,
                                                          primes = case.primes,
-                                                         skip_FR = true,
                                                          verbose = false)
 
             @test classified isa Vector{ACMG.ClassifiedMTC}
