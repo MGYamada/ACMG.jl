@@ -71,7 +71,7 @@ using ACMG
 end
 
 @testset "Pipeline fusion-rule aggregation key" begin
-    @testset "fusion_rule_key is invariant under non-unit relabeling and tensor type" begin
+    @testset "fusion_rule_key/canonical_rule are invariant under relabeling and tensor type" begin
         Nijk = zeros(Int, 3, 3, 3)
         for i in 1:3
             Nijk[1, i, i] = 1
@@ -88,6 +88,12 @@ end
         perm = [1, 3, 2]
         N_perm = Nijk[perm, perm, perm]
         @test ACMG.fusion_rule_key(Nijk) == ACMG.fusion_rule_key(N_perm)
+        @test ACMG.canonical_rule(Nijk) == ACMG.canonical_rule(N_perm)
         @test ACMG.fusion_rule_key(Int32.(Nijk)) == ACMG.fusion_rule_key(Nijk)
+
+        # Full relabeling including unit position should still match.
+        full_perm = [2, 1, 3]
+        N_full_perm = Nijk[full_perm, full_perm, full_perm]
+        @test ACMG.canonical_rule(Nijk) == ACMG.canonical_rule(N_full_perm)
     end
 end
