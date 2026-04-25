@@ -776,6 +776,13 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
                 continue
             end
 
+            rep_with_t = try
+                verify_mtc(F, R_vals, Nijk; T = T_complex)
+            catch
+                rep
+            end
+            ribbon_score = rep_with_t.ribbon_max === nothing ? Inf : rep_with_t.ribbon_max
+
             # Keep counters for API compatibility. n_matches now counts
             # numerically valid pentagon+hexagon candidates.
             best = (; best..., n_matches = best.n_matches + 1)
