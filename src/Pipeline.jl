@@ -747,7 +747,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
         verbose && println("    F[$fi]: $(length(R_sols)) hexagon sols")
 
-        for (ri, R_raw) in enumerate(R_sols)
+        for (ri, R_vals) in enumerate(R_sols)
             best = (; best..., n_tried = best.n_tried + 1)
 
             local rep
@@ -756,7 +756,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
                 # used for candidate selection. Phase 4 now picks an (F,R)
                 # by pentagon/hexagon consistency only; modular-data
                 # roundtrip matching is done afterwards in classify_from_group.
-                rep = verify_mtc(F, R, Nijk)
+                rep = verify_mtc(F, R_vals, Nijk)
             catch err
                 verbose && println("      R[$ri] verify failed: $err")
                 continue
@@ -772,12 +772,12 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
             best = (; best..., n_matches = best.n_matches + 1)
             if score < best.score
                 rep_with_t = try
-                    verify_mtc(F, R, Nijk; T = T_complex)
+                    verify_mtc(F, R_vals, Nijk; T = T_complex)
                 catch
                     rep
                 end
                 best = (; best...,
-                        F = F, R = R, report = rep_with_t,
+                        F = F, R = R_vals, report = rep_with_t,
                         f_idx = fi, r_idx = ri,
                         score = score)
             end
