@@ -117,6 +117,43 @@ that serve as a canonical invariant for matching across primes.
 """
 fusion_signature(c::MTCCandidate) = c.N
 
+function _lex_less(a::Vector{Int}, b::Vector{Int})
+    @inbounds for i in eachindex(a, b)
+        if a[i] < b[i]
+            return true
+        elseif a[i] > b[i]
+            return false
+        end
+    end
+    return false
+end
+
+"""
+    canonical_rule(rule::AbstractArray{<:Integer, 3}) -> String
+
+Return a deterministic, order-insensitive key for a fusion rule tensor.
+All simple-object labels are treated as unlabeled (full permutation
+canonicalization), integer types are normalized, and the lexicographically
+minimal flattened tensor representation is used as payload.
+"""
+function canonical_rule(rule::AbstractArray{<:Integer, 3})
+    size(rule, 1) == size(rule, 2) == size(rule, 3) ||
+        error("canonical_rule expects a rank-r cubic tensor")
+    N_int = Array{Int, 3}(rule)
+    r = size(N_int, 1)
+    labels = collect(1:r)
+    perms = isempty(labels) ? [Int[]] : _all_permutations(labels)
+    best = nothing
+    for perm in perms
+        candidate = vec(_permute_fusion_tensor(N_int, perm))
+        if best === nothing || _lex_less(candidate, best)
+            best = candidate
+        end
+    end
+    payload = join(best, ",")
+    return "r=$(r)|$payload"
+end
+
 """
     group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}})
         -> Vector{Dict{Int, MTCCandidate}}
@@ -133,27 +170,30 @@ conjugates will appear in the same group here — downstream consumers
 must pick a consistent Galois sector across primes (see
 `group_mtcs_galois_aware`).
 """
-function group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}})
-    groups = Vector{Dict{Int, MTCCandidate}}()
+function group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}};
+                              debug_stable_key::Bool = false)
+    groups_by_key = Dict{String, Dict{Int, MTCCandidate}}()
+    key_to_raw = Dict{String, Set{String}}()
     for (p, candidates) in results_by_prime
         for c in candidates
-            matched = false
-            for g in groups
-                rep = first(values(g))
-                if rep.N == c.N && rep.unit_index == c.unit_index
-                    if !haskey(g, p)
-                        g[p] = c
-                    end
-                    matched = true
-                    break
-                end
-            end
-            if !matched
-                new_group = Dict{Int, MTCCandidate}(p => c)
-                push!(groups, new_group)
+            key = canonical_rule(c.N)
+            group = get!(groups_by_key, key, Dict{Int, MTCCandidate}())
+            haskey(group, p) || (group[p] = c)
+            if debug_stable_key
+                raw = "unit=$(c.unit_index)|" * join(vec(c.N), ",")
+                push!(get!(key_to_raw, key, Set{String}()), raw)
             end
         end
     end
+    if debug_stable_key
+        for key in sort!(collect(keys(key_to_raw)))
+            println("[stable_key] key=$key")
+            for raw in sort!(collect(key_to_raw[key]))
+                println("  raw_rule=$raw")
+            end
+        end
+    end
+    groups = collect(values(groups_by_key))
     return groups
 end
 
@@ -199,6 +239,7 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
     groups = Vector{Dict{Int, MTCCandidate}}()
 
     for anchor_c in anchor_cands
+        anchor_key = canonical_rule(anchor_c.N)
         group = Dict{Int, MTCCandidate}(anchor_prime => anchor_c)
 
         for (p, cands) in results_by_prime
@@ -212,7 +253,7 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
                 # unit_index may legitimately differ across primes for
                 # equivalent candidates; use fusion-tensor equality as the
                 # compatibility guard here.
-                c.N == anchor_c.N || continue
+                canonical_rule(c.N) == anchor_key || continue
 
                 # Check: can we reconstruct 2·√d·S as Z[√d] from just {anchor, p}?
                 trial_signs = [nothing]
