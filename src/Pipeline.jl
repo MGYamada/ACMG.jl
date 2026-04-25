@@ -420,9 +420,9 @@ _is_reconstruction_unstable_message(msg::AbstractString) = begin
 end
 
 # OBSOLETE (Phase 5):
-# 直接この関数を呼んで candidate 比較を行うのは非推奨。
-# 比較規則・fallback を固定化した `_score_fr_st_match` /
-# `_select_fr_for_st` 経由で使うこと。
+# Directly calling this function for candidate comparison is deprecated.
+# Use `_score_fr_st_match` / `_select_fr_for_st`, which centralize
+# comparison rules and fallback behavior.
 function _modular_data_roundtrip_up_to_galois(F_values::Vector{ComplexF64},
                                               R_values::Vector{ComplexF64},
                                               Nijk::Array{Int,3},
@@ -575,15 +575,15 @@ end
                        candidate_index)
         -> NamedTuple
 
-Phase 5 用の `(F,R)` vs `(S,T)` マッチ判定 API。
+Phase-5 API to score `(F,R)` against `(S,T)`.
 
-返り値:
-- `ok`:     roundtrip が閾値内か
-- `S_max`:  `S` 側の最大誤差
-- `T_max`:  `T` 側の最大誤差
-- `best_a`: 最良な Galois 指数
-- `order_key`: candidate の total ordering 用キー
-- `candidate_index`: 入力 candidate index（最終 tie-break 用）
+Returns:
+- `ok`: whether roundtrip errors are within threshold
+- `S_max`: maximum S-side error
+- `T_max`: maximum T-side error
+- `best_a`: best Galois exponent
+- `order_key`: key for deterministic total ordering
+- `candidate_index`: input candidate index (final tie-break)
 """
 function _score_fr_st_match(F_values::Vector{ComplexF64},
                             R_values::Vector{ComplexF64},
@@ -593,12 +593,12 @@ function _score_fr_st_match(F_values::Vector{ComplexF64},
                             N::Int;
                             candidate_index::Int)
     md = _modular_data_roundtrip_up_to_galois(F_values, R_values, Nijk, S_target, T_target, N)
-    # Phase 5 で固定する比較規則:
-    #   1) ok=true を最優先
-    #   2) S_max が小さいもの
-    #   3) T_max が小さいもの
-    #   4) candidate_index が小さいもの
-    # Bool は false < true なので、ok 優先のため !ok を先頭に置く。
+    # Fixed comparison rule for Phase 5:
+    #   1) prioritize ok=true
+    #   2) smaller S_max
+    #   3) smaller T_max
+    #   4) smaller candidate_index
+    # Since false < true for Bool, place !ok first to prefer ok=true.
     order_key = (!md.ok, md.S_max, md.T_max, candidate_index)
     return (ok = md.ok,
             S_max = md.S_max,
@@ -612,14 +612,15 @@ end
     _select_fr_for_st(candidates, Nijk, S_target, T_target, N)
         -> (selected, score, selected_index, selected_ok, all_scores)
 
-Phase 5 用の candidate 選択 API。
-`order_key = (!ok, S_max, T_max, candidate_index)` による total ordering で
-`(F,R)` candidate を 1 つ選ぶ。
+Phase-5 candidate selection API.
+Selects one `(F,R)` candidate using total ordering by
+`order_key = (!ok, S_max, T_max, candidate_index)`.
 
-fallback 方針:
-- `ok=true` が 1 つ以上あれば、その中で最小 `order_key` を採用。
-- 1 つも無い場合は明示エラーにせず、`S_max/T_max` 最小（同率は index 最小）
-  を採用し、呼び出し側が `selected_ok=false` を参照できるようにする。
+Fallback policy:
+- If at least one candidate has `ok=true`, choose the minimal `order_key`.
+- If none has `ok=true`, do not raise an explicit error; choose the
+  minimum-error candidate (`S_max/T_max`, then index) and expose
+  `selected_ok=false` to callers.
 """
 function _select_fr_for_st(candidates::Vector{<:NamedTuple},
                            Nijk::Array{Int,3},
@@ -1480,8 +1481,9 @@ function classify_mtcs_at_conductor(N::Int;
         fr_result.F === nothing && error("Phase 4 could not produce any (F,R) solution for key=$key")
         isempty(fr_result.candidates) && error("Phase 4 produced no valid (F,R) candidates for key=$key")
 
-        # OBSOLETE: fusion-rule representative (`rep`) だけで roundtrip 選択する旧方式。
-        # 新方式では fusion-rule 内の各 `(S,T)` ごとに `(F,R)` を割り当てる。
+        # OBSOLETE: old behavior selected using only the fusion-rule
+        # representative (`rep`). New behavior assigns `(F,R)` per `(S,T)`
+        # member within the same fusion-rule group.
         for i in idxs
             mtc_i = out[i]
             selection = _select_fr_for_st(fr_result.candidates, mtc_i.Nijk,
