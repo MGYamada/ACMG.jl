@@ -154,6 +154,28 @@ Tests for CRT module (Phase 3) — pure F_p parts, no Oscar.
         @test haskey(g_N1, 41) && haskey(g_N1, 61)
     end
 
+    @testset "group_mtcs_by_fusion merges notation-only differences via stable_key" begin
+        # Same rank-2 fusion rule, but with swapped basis labels (including unit)
+        N = zeros(Int, 2, 2, 2)
+        N[1, 1, 1] = 1
+        N[1, 2, 2] = 1
+        N[2, 1, 2] = 1
+        N[2, 2, 1] = 1
+        N[2, 2, 2] = 1
+
+        perm = [2, 1]
+        N_perm = N[perm, perm, perm]
+
+        c41 = MTCCandidate(41, :dummy, [1 0; 0 1], [1, 1], 1, N, [1, 1], 2)
+        c61 = MTCCandidate(61, :dummy, [1 0; 0 1], [1, 1], 2, N_perm, [1, 1], 2)
+
+        results = Dict(41 => [c41], 61 => [c61])
+        groups = group_mtcs_by_fusion(results)
+        @test length(groups) == 1
+        @test length(groups[1]) == 2
+        @test ACMG.canonical_rule(N) == ACMG.canonical_rule(N_perm)
+    end
+
     @testset "build_sqrtd_selector + galois grouping branch alignment" begin
         # d=3 uses cyclotomic selector
         cyclo = ACMG.build_sqrtd_selector(3, [73], 73; verbose = false)

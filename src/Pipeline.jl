@@ -128,41 +128,13 @@ function _all_permutations(v::Vector{Int})
     return out
 end
 
-function _lex_less(a::Vector{Int}, b::Vector{Int})
-    @inbounds for i in eachindex(a, b)
-        if a[i] < b[i]
-            return true
-        elseif a[i] > b[i]
-            return false
-        end
-    end
-    return false
-end
-
 """
     fusion_rule_key(Nijk) -> String
 
-Create a unique, type-normalized, order-normalized key for a fusion rule.
-Normalization fixes unit index 1 and minimizes over all permutations of
-labels `2:r`, so equivalent relabelings map to the same key.
+Backward-compatible alias for `canonical_rule(Nijk)`.
 """
 function fusion_rule_key(Nijk::AbstractArray{<:Integer, 3})
-    size(Nijk, 1) == size(Nijk, 2) == size(Nijk, 3) ||
-        error("fusion_rule_key expects a rank-r cubic tensor")
-    N_int = Array{Int, 3}(Nijk)
-    r = size(N_int, 1)
-    labels = collect(2:r)
-    perms = isempty(labels) ? [Int[]] : _all_permutations(labels)
-    best = nothing
-    for p in perms
-        perm = isempty(labels) ? [1] : vcat(1, p)
-        candidate = vec(_permute_fusion_tensor(N_int, perm))
-        if best === nothing || _lex_less(candidate, best)
-            best = candidate
-        end
-    end
-    payload = join(best, ",")
-    return "r=$(r)|$payload"
+    return canonical_rule(Nijk)
 end
 
 function _classify_modular_data_by_fusion_rule(classified::Vector{ClassifiedMTC})
@@ -759,7 +731,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3};
     if r == 1
         F_trivial = ComplexF64[1.0]
         R_trivial = ComplexF64[1.0]
-        report = VerifyReport(0.0, 0.0, nothing, 0, 0, 1)
+        report = VerifyReport(0.0, 0.0, 0, 0, 1)
         cand = (F = F_trivial, R = R_trivial, report = report,
                 f_idx = 1, r_idx = 1)
         if return_all
