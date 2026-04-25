@@ -14,5 +14,6 @@ using Test
     include("test_verify_residuals.jl")
     include("test_pipeline_primes.jl")
     include("test_pipeline_galois_grouping.jl")
+    include("test_pipeline_roundtrip_logic.jl")
     include("test_pipeline_end_to_end.jl")
 end
