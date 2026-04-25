@@ -376,50 +376,149 @@ function _modular_data_roundtrip_up_to_galois(F_values::Vector{ComplexF64},
                                               S_target::Matrix{ComplexF64},
                                               T_target::Vector{ComplexF64},
                                               N::Int)
+    function reconstruct_S_from_T(Tvals::Vector{ComplexF64})
+        rloc = size(Nijk, 1)
+        fr = FusionRule(Nijk)
+        dual = fr.dual
+        A = zeros(Float64, rloc, rloc)
+        for i in 1:rloc
+            A .+= Float64.(Nijk[i, :, :])
+        end
+        eig = eigen(A)
+        idx = argmax(real(eig.values))
+        d = abs.(real(eig.vectors[:, idx]))
+        d ./= d[1]
+        D = sqrt(sum(d .^ 2))
+
+        S_from = Matrix{ComplexF64}(undef, rloc, rloc)
+        for i in 1:rloc, j in 1:rloc
+            acc = 0.0 + 0.0im
+            jdual = dual[j]
+            for k in 1:rloc
+                Nijk[i, jdual, k] == 0 && continue
+                acc += Nijk[i, jdual, k] * (Tvals[k] / (Tvals[i] * Tvals[jdual])) * d[k]
+            end
+            S_from[i, j] = acc / D
+        end
+        return S_from
+    end
+
+    function infer_T_candidates_from_R(Rvals::Vector{ComplexF64};
+                                       max_candidates::Int = 32)
+        rloc = size(Nijk, 1)
+        vars = max(0, rloc - 1)  # t_2, ..., t_r in Z/NZ (t_1 = 0)
+        if vars == 0
+            return [ComplexF64[1.0]]
+        end
+
+        eqs = Tuple{Int, Int, Int, Int}[]
+        for i in 1:rloc, j in 1:rloc, k in 1:rloc
+            Nijk[i, j, k] == 0 && continue
+            R_block = extract_R_block(Rvals, Nijk, i, j, k)
+            size(R_block) == (1, 1) || continue
+            z = R_block[1, 1]^2
+            # Project to unit circle to reduce HC numerical drift.
+            z = iszero(z) ? z : z / abs(z)
+            m = mod(round(Int, (N * angle(z)) / (2π)), N)
+            push!(eqs, (i, j, k, m))
+        end
+
+        assignments = fill(-1, vars)  # -1 = unassigned
+        sols = Vector{Vector{Int}}()
+
+        get_t(idx::Int) = idx == 1 ? 0 : assignments[idx - 1]
+
+        function eq_satisfied_or_pending(i::Int, j::Int, k::Int, m::Int)
+            ti = get_t(i)
+            tj = get_t(j)
+            tk = get_t(k)
+            if ti < 0 || tj < 0 || tk < 0
+                return true
+            end
+            return mod(ti + tj - tk - m, N) == 0
+        end
+
+        function backtrack(pos::Int)
+            length(sols) >= max_candidates && return
+            if pos > vars
+                for (i, j, k, m) in eqs
+                    eq_satisfied_or_pending(i, j, k, m) || return
+                end
+                push!(sols, copy(assignments))
+                return
+            end
+            for v in 0:(N - 1)
+                assignments[pos] = v
+                local ok = true
+                for (i, j, k, m) in eqs
+                    if !(eq_satisfied_or_pending(i, j, k, m))
+                        ok = false
+                        break
+                    end
+                end
+                ok && backtrack(pos + 1)
+                length(sols) >= max_candidates && return
+            end
+            assignments[pos] = -1
+        end
+
+        backtrack(1)
+        T_candidates = Vector{Vector{ComplexF64}}()
+        for sol in sols
+            Tvals = Vector{ComplexF64}(undef, rloc)
+            Tvals[1] = 1.0 + 0.0im
+            for i in 2:rloc
+                t = sol[i - 1]
+                Tvals[i] = exp((2π * im * t) / N)
+            end
+            push!(T_candidates, Tvals)
+        end
+        return T_candidates
+    end
+
     r = size(Nijk, 1)
     units = [a for a in 1:N if gcd(a, N) == 1]
-    best_rib = Inf
+    best_s = Inf
+    best_t = Inf
     best_a = 1
-    best_T = T_target
-    for a in units
-        T_trial = a == 1 ? T_target : (T_target .^ a)
-        rib = ribbon_residuals(R_values, T_trial, Nijk)
-        rib_max = maximum(rib)
-        if rib_max < best_rib
-            best_rib = rib_max
-            best_a = a
-            best_T = T_trial
+    best_T = copy(T_target)
+
+    T_from_FR_candidates = infer_T_candidates_from_R(R_values)
+    isempty(T_from_FR_candidates) && return (ok = false, best_a = 1,
+                                             ribbon_max = NaN, S_max = Inf,
+                                             T_max = Inf, T_best = best_T)
+
+    for T_from_FR in T_from_FR_candidates
+        S_from = reconstruct_S_from_T(T_from_FR)
+        s_err = min(maximum(abs.(S_from .- S_target)),
+                    maximum(abs.(S_from .+ S_target)))
+
+        local t_err_best = Inf
+        local a_best = 1
+        for a in units
+            T_trial = a == 1 ? T_target : (T_target .^ a)
+            t_err = maximum(abs.(T_from_FR .- T_trial))
+            if t_err < t_err_best
+                t_err_best = t_err
+                a_best = a
+            end
+        end
+
+        # Lexicographic selection: prioritize S reconstruction, then T match.
+        if (s_err < best_s) || (isapprox(s_err, best_s; atol = 1e-12) && t_err_best < best_t)
+            best_s = s_err
+            best_t = t_err_best
+            best_a = a_best
+            best_T = T_from_FR
         end
     end
 
-    # Reconstruct S from (N, θ, d) using the balancing-expression form.
-    fr = FusionRule(Nijk)
-    dual = fr.dual
-    A = zeros(Float64, r, r)
-    for i in 1:r
-        A .+= Float64.(Nijk[i, :, :])
-    end
-    eig = eigen(A)
-    idx = argmax(real(eig.values))
-    d = abs.(real(eig.vectors[:, idx]))
-    d ./= d[1]
-    D = sqrt(sum(d .^ 2))
-
-    S_from = Matrix{ComplexF64}(undef, r, r)
-    for i in 1:r, j in 1:r
-        acc = 0.0 + 0.0im
-        jdual = dual[j]
-        for k in 1:r
-            Nijk[i, jdual, k] == 0 && continue
-            acc += Nijk[i, jdual, k] * (best_T[k] / (best_T[i] * best_T[jdual])) * d[k]
-        end
-        S_from[i, j] = acc / D
-    end
-
-    s_err = min(maximum(abs.(S_from .- S_target)),
-                maximum(abs.(S_from .+ S_target)))
-    ok = best_rib < 1e-6 && s_err < 5e-2
-    return (ok = ok, best_a = best_a, ribbon_max = best_rib, S_max = s_err, T_best = best_T)
+    # `(F, R)` is matched by reconstructing (S, T) directly from R and
+    # comparing against CRT-lifted targets up to Galois.
+    _ = F_values
+    ok = best_s < 5e-2 && best_t < 5e-2
+    return (ok = ok, best_a = best_a, ribbon_max = NaN,
+            S_max = best_s, T_max = best_t, T_best = best_T)
 end
 
 function _branch_consistency_precheck(results_by_prime::Dict{Int, Vector{MTCCandidate}},
@@ -625,7 +724,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
             n_matches = 0,
             f_idx = 0,
             r_idx = 0,
-            ribbon_max = Inf)
+            score = Inf)
 
     for (fi, F_raw) in enumerate(F_sols)
         local F
@@ -648,37 +747,48 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
         verbose && println("    F[$fi]: $(length(R_sols)) hexagon sols")
 
-        for (ri, R) in enumerate(R_sols)
+        for (ri, R_vals) in enumerate(R_sols)
             best = (; best..., n_tried = best.n_tried + 1)
 
-            local rib_max
+            local rep
             try
-                rib = ribbon_residuals(R, T_complex, Nijk)
-                rib_max = maximum(rib)
+                # Ribbon-residual based matching is intentionally no longer
+                # used for candidate selection. Phase 4 now picks an (F,R)
+                # by pentagon/hexagon consistency only; modular-data
+                # roundtrip matching is done afterwards in classify_from_group.
+                rep = verify_mtc(F, R_vals, Nijk)
             catch err
-                verbose && println("      R[$ri] ribbon failed: $err")
+                verbose && println("      R[$ri] verify failed: $err")
+                continue
+            end
+            score = max(rep.pentagon_max, rep.hexagon_max)
+            if !isfinite(score)
+                verbose && println("      R[$ri] non-finite pent/hex score: $score")
                 continue
             end
 
-            if rib_max < ribbon_atol
-                best = (; best..., n_matches = best.n_matches + 1)
-            end
-            if rib_max < best.ribbon_max
-                rep = verify_mtc(F, R, Nijk; T = T_complex)
+            # Keep counters for API compatibility. n_matches now counts
+            # numerically valid pentagon+hexagon candidates.
+            best = (; best..., n_matches = best.n_matches + 1)
+            if score < best.score
+                rep_with_t = try
+                    verify_mtc(F, R_vals, Nijk; T = T_complex)
+                catch
+                    rep
+                end
                 best = (; best...,
-                        F = F, R = R, report = rep,
+                        F = F, R = R_vals, report = rep_with_t,
                         f_idx = fi, r_idx = ri,
-                        ribbon_max = rib_max)
+                        score = score)
             end
         end
     end
 
-    if require_ribbon_match && best.n_matches == 0
-        best = (; best..., F = nothing, R = nothing, report = nothing,
-                f_idx = 0, r_idx = 0)
-    end
+    # Backward-compatible knobs kept in signature (deprecated path).
+    _ = ribbon_atol
+    _ = require_ribbon_match
 
-    # Drop the internal ribbon_max field from the public return
+    # Drop the internal score field from the public return
     return (F = best.F, R = best.R, report = best.report,
             n_pentagon = best.n_pentagon, n_tried = best.n_tried,
             n_matches = best.n_matches,
@@ -831,7 +941,7 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
     md_roundtrip = _modular_data_roundtrip_up_to_galois(fr_result.F, fr_result.R,
                                                         Nijk, S_ℂ, T_for_phase4, N)
     verbose && println("  modular-data roundtrip: galois a=$(md_roundtrip.best_a), " *
-                       "ribbon=$(md_roundtrip.ribbon_max), S_err=$(md_roundtrip.S_max), " *
+                       "S_err=$(md_roundtrip.S_max), T_err=$(md_roundtrip.T_max), " *
                        "ok=$(md_roundtrip.ok)")
 
     return ClassifiedMTC(N, N_input, rank, stratum, Nijk, recon_S_phase4,
