@@ -117,6 +117,141 @@ that serve as a canonical invariant for matching across primes.
 """
 fusion_signature(c::MTCCandidate) = c.N
 
+function _label_signature(N::Array{Int, 3}, i::Int)
+    r = size(N, 1)
+    s1 = 0
+    s2 = 0
+    s3 = 0
+    q1 = 0
+    q2 = 0
+    q3 = 0
+    d1 = 0
+    d2 = 0
+    d3 = 0
+    @inbounds for j in 1:r, k in 1:r
+        a = N[i, j, k]
+        b = N[j, i, k]
+        c = N[j, k, i]
+        s1 += a
+        s2 += b
+        s3 += c
+        q1 += a * a
+        q2 += b * b
+        q3 += c * c
+    end
+    @inbounds for j in 1:r
+        d1 += N[i, j, j]
+        d2 += N[j, i, j]
+        d3 += N[j, j, i]
+    end
+    return (s1, s2, s3, q1, q2, q3, d1, d2, d3)
+end
+
+function _perm_lex_less(N::Array{Int, 3}, perm::Vector{Int}, best::Vector{Int})
+    idx = 1
+    r = size(N, 1)
+    @inbounds for k in 1:r, j in 1:r, i in 1:r
+        v = N[perm[i], perm[j], perm[k]]
+        b = best[idx]
+        if v < b
+            return true
+        elseif v > b
+            return false
+        end
+        idx += 1
+    end
+    return false
+end
+
+function _flatten_permuted(N::Array{Int, 3}, perm::Vector{Int})
+    r = size(N, 1)
+    out = Vector{Int}(undef, r * r * r)
+    idx = 1
+    @inbounds for k in 1:r, j in 1:r, i in 1:r
+        out[idx] = N[perm[i], perm[j], perm[k]]
+        idx += 1
+    end
+    return out
+end
+
+function _for_each_permutation!(f::F, v::Vector{Int}) where {F}
+    function rec(start::Int)
+        if start > length(v)
+            f(v)
+            return
+        end
+        for i in start:length(v)
+            v[start], v[i] = v[i], v[start]
+            rec(start + 1)
+            v[start], v[i] = v[i], v[start]
+        end
+    end
+    rec(1)
+    return nothing
+end
+
+"""
+    canonical_rule(rule::AbstractArray{<:Integer, 3}) -> String
+
+Return a deterministic, order-insensitive key for a fusion rule tensor.
+All simple-object labels are treated as unlabeled (full permutation
+canonicalization), integer types are normalized, and a blockwise
+lexicographic minimization is used as payload:
+
+- labels are first partitioned by permutation-invariant signatures;
+- only labels inside the same signature block are permuted;
+- we minimize lexicographically over the product of per-block permutations.
+
+This reduces search from `r!` to `∏_b |b|!` without changing key stability.
+"""
+function canonical_rule(rule::AbstractArray{<:Integer, 3})
+    size(rule, 1) == size(rule, 2) == size(rule, 3) ||
+        error("canonical_rule expects a rank-r cubic tensor")
+    N_int = Array{Int, 3}(rule)
+    r = size(N_int, 1)
+
+    labels = collect(1:r)
+    sigs = [_label_signature(N_int, i) for i in labels]
+    order = sortperm(labels; by = i -> sigs[i])
+    sorted_labels = labels[order]
+    sorted_sigs = sigs[order]
+
+    blocks = Vector{Vector{Int}}()
+    i = 1
+    while i <= r
+        j = i
+        while j < r && sorted_sigs[j + 1] == sorted_sigs[i]
+            j += 1
+        end
+        push!(blocks, sorted_labels[i:j])
+        i = j + 1
+    end
+
+    best = nothing
+    current = Vector{Int}(undef, r)
+
+    function dfs_block(bi::Int, offset::Int)
+        if bi > length(blocks)
+            if best === nothing || _perm_lex_less(N_int, current, best)
+                best = _flatten_permuted(N_int, current)
+            end
+            return
+        end
+
+        block = copy(blocks[bi])
+        _for_each_permutation!(block) do p
+            @inbounds for t in eachindex(p)
+                current[offset + t - 1] = p[t]
+            end
+            dfs_block(bi + 1, offset + length(p))
+        end
+    end
+    dfs_block(1, 1)
+
+    payload = join(best, ",")
+    return "r=$(r)|$payload"
+end
+
 """
     group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}})
         -> Vector{Dict{Int, MTCCandidate}}
@@ -133,27 +268,30 @@ conjugates will appear in the same group here — downstream consumers
 must pick a consistent Galois sector across primes (see
 `group_mtcs_galois_aware`).
 """
-function group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}})
-    groups = Vector{Dict{Int, MTCCandidate}}()
+function group_mtcs_by_fusion(results_by_prime::Dict{Int, Vector{MTCCandidate}};
+                              debug_stable_key::Bool = false)
+    groups_by_key = Dict{String, Dict{Int, MTCCandidate}}()
+    key_to_raw = Dict{String, Set{String}}()
     for (p, candidates) in results_by_prime
         for c in candidates
-            matched = false
-            for g in groups
-                rep = first(values(g))
-                if rep.N == c.N && rep.unit_index == c.unit_index
-                    if !haskey(g, p)
-                        g[p] = c
-                    end
-                    matched = true
-                    break
-                end
-            end
-            if !matched
-                new_group = Dict{Int, MTCCandidate}(p => c)
-                push!(groups, new_group)
+            key = canonical_rule(c.N)
+            group = get!(groups_by_key, key, Dict{Int, MTCCandidate}())
+            haskey(group, p) || (group[p] = c)
+            if debug_stable_key
+                raw = "unit=$(c.unit_index)|" * join(vec(c.N), ",")
+                push!(get!(key_to_raw, key, Set{String}()), raw)
             end
         end
     end
+    if debug_stable_key
+        for key in sort!(collect(keys(key_to_raw)))
+            println("[stable_key] key=$key")
+            for raw in sort!(collect(key_to_raw[key]))
+                println("  raw_rule=$raw")
+            end
+        end
+    end
+    groups = collect(values(groups_by_key))
     return groups
 end
 
@@ -199,6 +337,7 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
     groups = Vector{Dict{Int, MTCCandidate}}()
 
     for anchor_c in anchor_cands
+        anchor_key = canonical_rule(anchor_c.N)
         group = Dict{Int, MTCCandidate}(anchor_prime => anchor_c)
 
         for (p, cands) in results_by_prime
@@ -212,7 +351,7 @@ function group_mtcs_galois_aware(results_by_prime::Dict{Int, Vector{MTCCandidate
                 # unit_index may legitimately differ across primes for
                 # equivalent candidates; use fusion-tensor equality as the
                 # compatibility guard here.
-                c.N == anchor_c.N || continue
+                canonical_rule(c.N) == anchor_key || continue
 
                 # Check: can we reconstruct 2·√d·S as Z[√d] from just {anchor, p}?
                 trial_signs = [nothing]
