@@ -144,6 +144,7 @@ end
         fr = compute_FR_from_ST(Nijk, T_expected;
                                 ribbon_atol = 1e-8,
                                 require_ribbon_match = false,
+                                return_all = true,
                                 pentagon_slice = 1,
                                 show_progress = false,
                                 verbose = false)
@@ -151,5 +152,6 @@ end
         @test fr.R !== nothing
         @test fr.report !== nothing
         @test fr.report.ribbon_max === nothing
+        @test length(fr.candidates) >= 1
     end
 end
