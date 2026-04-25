@@ -490,26 +490,22 @@ function _modular_data_roundtrip_up_to_galois(F_values::Vector{ComplexF64},
 
     for T_from_FR in T_from_FR_candidates
         S_from = reconstruct_S_from_T(T_from_FR)
-        s_err = min(maximum(abs.(S_from .- S_target)),
-                    maximum(abs.(S_from .+ S_target)))
-
-        local t_err_best = Inf
-        local a_best = 1
         for a in units
             T_trial = a == 1 ? T_target : (T_target .^ a)
+            S_trial = reconstruct_S_from_T(T_trial)
+            s_err = min(maximum(abs.(S_from .- S_trial)),
+                        maximum(abs.(S_from .+ S_trial)))
             t_err = maximum(abs.(T_from_FR .- T_trial))
-            if t_err < t_err_best
-                t_err_best = t_err
-                a_best = a
+            # Lexicographic selection on each (T_from_FR, a) pair:
+            # prioritize S reconstruction consistency under the same
+            # Galois action, then T match.
+            if (s_err < best_s) ||
+               (isapprox(s_err, best_s; atol = 1e-12) && t_err < best_t)
+                best_s = s_err
+                best_t = t_err
+                best_a = a
+                best_T = T_from_FR
             end
-        end
-
-        # Lexicographic selection: prioritize S reconstruction, then T match.
-        if (s_err < best_s) || (isapprox(s_err, best_s; atol = 1e-12) && t_err_best < best_t)
-            best_s = s_err
-            best_t = t_err_best
-            best_a = a_best
-            best_T = T_from_FR
         end
     end
 
