@@ -650,7 +650,7 @@ function compute_FR_from_ST(Nijk::Array{Int, 3},
 
         verbose && println("    F[$fi]: $(length(R_sols)) hexagon sols")
 
-        for (ri, R) in enumerate(R_sols)
+        for (ri, R_raw) in enumerate(R_sols)
             best = (; best..., n_tried = best.n_tried + 1)
 
             local rep
