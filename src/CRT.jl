@@ -128,28 +128,93 @@ function _lex_less(a::Vector{Int}, b::Vector{Int})
     return false
 end
 
+function _label_signature(N::Array{Int, 3}, i::Int)
+    r = size(N, 1)
+    s1 = 0
+    s2 = 0
+    s3 = 0
+    q1 = 0
+    q2 = 0
+    q3 = 0
+    d1 = 0
+    d2 = 0
+    d3 = 0
+    @inbounds for j in 1:r, k in 1:r
+        a = N[i, j, k]
+        b = N[j, i, k]
+        c = N[j, k, i]
+        s1 += a
+        s2 += b
+        s3 += c
+        q1 += a * a
+        q2 += b * b
+        q3 += c * c
+    end
+    @inbounds for j in 1:r
+        d1 += N[i, j, j]
+        d2 += N[j, i, j]
+        d3 += N[j, j, i]
+    end
+    return (s1, s2, s3, q1, q2, q3, d1, d2, d3)
+end
+
 """
     canonical_rule(rule::AbstractArray{<:Integer, 3}) -> String
 
 Return a deterministic, order-insensitive key for a fusion rule tensor.
 All simple-object labels are treated as unlabeled (full permutation
-canonicalization), integer types are normalized, and the lexicographically
-minimal flattened tensor representation is used as payload.
+canonicalization), integer types are normalized, and a blockwise
+lexicographic minimization is used as payload:
+
+- labels are first partitioned by permutation-invariant signatures;
+- only labels inside the same signature block are permuted;
+- we minimize lexicographically over the product of per-block permutations.
+
+This reduces search from `r!` to `∏_b |b|!` without changing key stability.
 """
 function canonical_rule(rule::AbstractArray{<:Integer, 3})
     size(rule, 1) == size(rule, 2) == size(rule, 3) ||
         error("canonical_rule expects a rank-r cubic tensor")
     N_int = Array{Int, 3}(rule)
     r = size(N_int, 1)
+
     labels = collect(1:r)
-    perms = isempty(labels) ? [Int[]] : _all_permutations(labels)
+    sigs = [_label_signature(N_int, i) for i in labels]
+    order = sortperm(labels; by = i -> sigs[i])
+    sorted_labels = labels[order]
+    sorted_sigs = sigs[order]
+
+    blocks = Vector{Vector{Int}}()
+    i = 1
+    while i <= r
+        j = i
+        while j < r && sorted_sigs[j + 1] == sorted_sigs[i]
+            j += 1
+        end
+        push!(blocks, sorted_labels[i:j])
+        i = j + 1
+    end
+
+    perms_per_block = [isempty(b) ? [Int[]] : _all_permutations(b) for b in blocks]
     best = nothing
-    for perm in perms
-        candidate = vec(_permute_fusion_tensor(N_int, perm))
-        if best === nothing || _lex_less(candidate, best)
-            best = candidate
+    current = Int[]
+    function dfs_block(bi::Int)
+        if bi > length(blocks)
+            candidate = vec(_permute_fusion_tensor(N_int, current))
+            if best === nothing || _lex_less(candidate, best)
+                best = candidate
+            end
+            return
+        end
+        old_len = length(current)
+        for p in perms_per_block[bi]
+            append!(current, p)
+            dfs_block(bi + 1)
+            resize!(current, old_len)
         end
     end
+    dfs_block(1)
+
     payload = join(best, ",")
     return "r=$(r)|$payload"
 end
