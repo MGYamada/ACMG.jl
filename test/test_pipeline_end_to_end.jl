@@ -58,6 +58,18 @@ using ACMG
                   filter(m -> m.rank <= 2, classified))
     end
 
+    @testset "N=8 auto primes keep exact fixed-stratum sectors" begin
+        classified = ACMG.classify_mtcs_at_conductor(8;
+                                                     max_rank = 3,
+                                                     verbose = false)
+        @test length(classified) == 6
+        @test count(m -> m.rank == 2, classified) == 2
+        @test count(m -> m.rank == 3, classified) == 2
+        @test all(m -> m.verify_exact_lift === true, classified)
+        @test all(m -> m.verify_report !== nothing && m.verify_report.ok,
+                  filter(m -> m.rank <= 2, classified))
+    end
+
     @testset "N=20 exact layer is single-pass and roundtrips" begin
         classified = ACMG.classify_mtcs_at_conductor(20;
                                                      max_rank = 2,

@@ -161,7 +161,7 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
             error("exact fixed-stratum lift failed finite-field verification")
         end
     end
-    if !verify_fresh
+    if exact_data === nothing && !verify_fresh
         error("CRT S reconstruction failed fresh-prime verification; " *
               "the candidate is not stable in the selected reconstruction field")
     end
