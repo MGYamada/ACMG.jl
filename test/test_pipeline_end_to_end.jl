@@ -22,6 +22,18 @@ using ACMG
         @test classified[1].verify_report.ok
     end
 
+    @testset "N=2 d=1 fresh primes validate with rational branch" begin
+        classified = ACMG.classify_mtcs_at_conductor(2;
+                                                     max_rank = 5,
+                                                     skip_FR = true,
+                                                     verbose = false)
+        @test length(classified) == 2
+        @test all(m -> m.verify_fresh, classified)
+        @test all(m -> m.verify_exact_lift === true, classified)
+        @test all(m -> !isempty(m.fresh_primes), classified)
+        @test all(m -> all(entry -> entry[2] == 0, m.S_Zsqrtd), classified)
+    end
+
     @testset "N=7 fixed atomic strata lift exactly" begin
         classified = ACMG.classify_mtcs_at_conductor(7;
                                                      max_rank = 3,
@@ -31,6 +43,7 @@ using ACMG
         @test length(classified) == 3
         @test any(m -> m.rank == 3, classified)
         @test all(m -> m.verify_fresh, classified)
+        @test all(m -> m.verify_exact_lift === true, classified)
     end
 
     @testset "N=8 rank-3 groups without F/R do not abort pipeline" begin
@@ -41,6 +54,18 @@ using ACMG
         @test length(classified) == 6
         @test count(m -> m.rank == 3, classified) == 2
         @test all(m -> m.verify_report === nothing, filter(m -> m.rank == 3, classified))
+        @test all(m -> m.verify_report !== nothing && m.verify_report.ok,
+                  filter(m -> m.rank <= 2, classified))
+    end
+
+    @testset "N=8 auto primes keep exact fixed-stratum sectors" begin
+        classified = ACMG.classify_mtcs_at_conductor(8;
+                                                     max_rank = 3,
+                                                     verbose = false)
+        @test length(classified) == 6
+        @test count(m -> m.rank == 2, classified) == 2
+        @test count(m -> m.rank == 3, classified) == 2
+        @test all(m -> m.verify_exact_lift === true, classified)
         @test all(m -> m.verify_report !== nothing && m.verify_report.ok,
                   filter(m -> m.rank <= 2, classified))
     end
