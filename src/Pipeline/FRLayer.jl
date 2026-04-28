@@ -37,8 +37,8 @@ function _select_fr_for_st(candidates, Nijk, S_cyc, T_cyc, N)
             score = merge(score, (galois_exponent = a,
                                   report = report,
                                   order_key = (score.ok ? 0 : 1,
-                                               string(score.T_max),
-                                               string(score.S_max),
+                                               score.T_mismatches,
+                                               score.S_mismatches,
                                                ci,
                                                a)))
             push!(all_scores, score)
@@ -186,6 +186,8 @@ function _modular_data_roundtrip(F_values::Vector,
         T_diffs = [T_from_R[perm[i]] - T_target[i] for i in 1:r]
         S_ok = all(iszero, S_diffs)
         T_ok = all(iszero, T_diffs)
+        S_mismatches = count(!iszero, S_diffs)
+        T_mismatches = count(!iszero, T_diffs)
         S_err = S_ok ? zero(K) : first(x for x in S_diffs if !iszero(x))
         T_err = T_ok ? zero(K) : first(x for x in T_diffs if !iszero(x))
         score = FRRoundtripReport(ok = S_ok && T_ok,
