@@ -1,7 +1,7 @@
-struct BraidRelationCheck
+struct BraidRelationCheck{T}
     ok::Bool
     failures::Vector{NamedTuple}
-    tolerance::Any
+    tolerance::T
 end
 
 _mat_close(A, B; atol = 0) = atol == 0 ? A == B :

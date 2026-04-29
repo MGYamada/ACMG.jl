@@ -19,15 +19,6 @@ Base.length(b::FusionTreeBasis) = length(b.paths)
 Base.iterate(b::FusionTreeBasis, st...) = iterate(b.paths, st...)
 dim(b::FusionTreeBasis) = length(b)
 
-_object_label(x::Integer) = Int(x)
-_object_label(x::Symbol) = x === :one || x === Symbol("1") ? 1 :
-    x === :τ || x === :tau || x === :Tau ? 2 :
-    x === :s ? 2 :
-    x === :σ || x === :sigma ? 2 :
-    x === :ψ || x === :psi ? 3 :
-    error("unsupported symbolic simple-object label $x; pass integer labels or one of :one, :τ/:tau, :s, :σ/:sigma, :ψ/:psi")
-_object_labels(xs) = [_object_label(x) for x in xs]
-
 function fusion_paths(rules, objects::AbstractVector, total)
     fr = _fusion_rule(rules)
     require_multiplicity_free(fr)

@@ -24,3 +24,44 @@ using ACMG
     @test_throws ErrorException gauge_fix(fr_equation_system(fibonacci_fusion_rules());
                                           strategy = :canonical)
 end
+
+@testset "FRData-backed gauge accessors and transforms" begin
+    fib = fibonacci_fr_data()
+
+    @test simples(fib) == [:one, :τ]
+    @test fusion_coeff(fib, :τ, :τ, :one) == 1
+    @test fusion_coeff(fib, "τ", "τ", "τ") == 1
+    @test fusion_channels(fib, :τ, :τ) == [:one, :τ]
+    @test hom_basis(fib, :τ, :τ, :τ) == [1]
+    @test gauge_basis_indices(fib, :τ, :τ, :τ) == [1]
+    @test validate_frdata_for_gauge(fib)
+    @test has_F_symbol(fib, :τ, :τ, :τ, :τ; e = :one, f = :τ)
+    @test has_R_symbol(fib, :τ, :τ, :one)
+
+    identity = gauge_transform(fib, nothing)
+    @test identity isa FRData
+    @test identity.F_values == fib.F_values
+    @test identity.R_values == fib.R_values
+
+    K = parent(fib.F_values[1])
+    scalars = Dict((ch[1], ch[2], ch[3]) =>
+                   (ch[1] == 1 || ch[2] == 1 ? one(K) : K(ch[1] + ch[2] + ch[3]))
+                   for ch in gauge_parameters(fib))
+    moved = gauge_transform(fib, GaugeTransform(scalars, Int[], false))
+    moved_legacy = gauge_transform(fib.F_values, fib.R_values,
+                                   GaugeTransform(scalars, Int[], false);
+                                   Nijk = fib.rules.N)
+    @test moved.F_values == moved_legacy.F
+    @test moved.R_values == moved_legacy.R
+
+    params = GaugeParameters(Dict((a, b, c, 1) => v for ((a, b, c), v) in scalars))
+    moved_params = gauge_transform(fib, params)
+    @test moved_params.F_values == moved.F_values
+    @test moved_params.R_values == moved.R_values
+
+    fixed = canonical_gauge(moved)
+    @test fixed isa GaugeFixingResult
+    @test fixed.complete
+    @test fixed.F == canonical_gauge(moved.F_values, moved.R_values, moved.rules.N).F
+    @test gauge_equivalent(fib, moved)
+end

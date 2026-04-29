@@ -22,8 +22,17 @@ function _fusion_array(Nijk::Array{Int, 3})
     return Nijk
 end
 
+_gauge_rules(frdata::FRData) = fusion_rule(frdata)
+_gauge_rules(rules) = _fusion_rule(rules)
+
 function _require_multiplicity_free_toric(Nijk::Array{Int,3})
     all(x -> x == 0 || x == 1, Nijk) ||
+        error("toric gauge infrastructure currently supports multiplicity-free fusion rules only")
+    return true
+end
+
+function _require_multiplicity_free_toric(rules)
+    is_multiplicity_free(_gauge_rules(rules)) ||
         error("toric gauge infrastructure currently supports multiplicity-free fusion rules only")
     return true
 end
@@ -34,12 +43,12 @@ end
 Return the ordered torus parameters `(a,b,c)` with `N_ab^c = 1`.
 """
 function gauge_parameters(fusion_rule)
-    Nijk = _fusion_array(fusion_rule)
-    _require_multiplicity_free_toric(Nijk)
-    r = size(Nijk, 1)
+    fr = _gauge_rules(fusion_rule)
+    _require_multiplicity_free_toric(fr)
+    r = fr.rank
     params = GaugeParameter[]
     for a in 1:r, b in 1:r, c in 1:r
-        Nijk[a, b, c] == 0 && continue
+        fusion_coeff(fr, a, b, c) == 0 && continue
         push!(params, (a, b, c))
     end
     return params
@@ -78,12 +87,15 @@ function r_symbol_weight(a::Int, b::Int, c::Int)
     return w
 end
 
-function _admissible_f_coordinates(Nijk::Array{Int,3})
-    r = size(Nijk, 1)
+function _admissible_f_coordinates(fusion_rule)
+    fr = _gauge_rules(fusion_rule)
+    r = fr.rank
     coords = NamedTuple[]
     for a in 1:r, b in 1:r, c in 1:r, d in 1:r
-        left = Int[e for e in 1:r if Nijk[a, b, e] != 0 && Nijk[e, c, d] != 0]
-        right = Int[f for f in 1:r if Nijk[b, c, f] != 0 && Nijk[a, f, d] != 0]
+        left = Int[e for e in 1:r if fusion_coeff(fr, a, b, e) != 0 &&
+                                      fusion_coeff(fr, e, c, d) != 0]
+        right = Int[f for f in 1:r if fusion_coeff(fr, b, c, f) != 0 &&
+                                       fusion_coeff(fr, a, f, d) != 0]
         for e in left, f in right
             push!(coords, (kind = :F, a = a, b = b, c = c, d = d, e = e, f = f))
         end
@@ -91,11 +103,12 @@ function _admissible_f_coordinates(Nijk::Array{Int,3})
     return coords
 end
 
-function _admissible_r_coordinates(Nijk::Array{Int,3})
-    r = size(Nijk, 1)
+function _admissible_r_coordinates(fusion_rule)
+    fr = _gauge_rules(fusion_rule)
+    r = fr.rank
     coords = NamedTuple[]
     for a in 1:r, b in 1:r, c in 1:r
-        Nijk[a, b, c] == 0 && continue
+        fusion_coeff(fr, a, b, c) == 0 && continue
         push!(coords, (kind = :R, a = a, b = b, c = c))
     end
     return coords
@@ -108,10 +121,9 @@ Return the ordered multiplicity-free F-symbol coordinates and, when
 `include_R=true`, R-symbol coordinates determined by the fusion rule.
 """
 function symbol_coordinates(fusion_rule; include_R::Bool = true)
-    Nijk = _fusion_array(fusion_rule)
-    _require_multiplicity_free_toric(Nijk)
-    coords = _admissible_f_coordinates(Nijk)
-    include_R && append!(coords, _admissible_r_coordinates(Nijk))
+    _require_multiplicity_free_toric(fusion_rule)
+    coords = _admissible_f_coordinates(fusion_rule)
+    include_R && append!(coords, _admissible_r_coordinates(fusion_rule))
     return coords
 end
 

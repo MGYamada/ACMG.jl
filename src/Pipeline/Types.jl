@@ -234,7 +234,9 @@ function Base.show(io::IO, m::ClassifiedMTC)
     else
         rep = m.verify_report
         if rep !== nothing && hasproperty(rep, :ok)
-            "(F,R) roundtrip=$(rep.ok ? "✓" : "✗")"
+            rep.ok ? "(F,R) roundtrip=✓" :
+            (iszero(rep.S_error) ? "(F,R) roundtrip=S✓/T✗" :
+             "(F,R) roundtrip=✗")
         else
             "(F,R)=attached"
         end

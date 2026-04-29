@@ -93,7 +93,7 @@ function _hexagon_equations_with_F_values(mult::Array{Int,3}, one_vec::Vector{In
     _fill_braiding!(poly_C_fwd, r_vars, mult, R_ring)
 
     eqs = elem_type(R_ring)[]
-    Ss = simples(poly_C_fwd)
+    Ss = TensorCategories.simples(poly_C_fwd)
     for X in Ss, Y in Ss, Z in Ss
         lhs = (braiding(X, Y) ⊗ id(Z)) ∘ associator(Y, X, Z) ∘ (id(Y) ⊗ braiding(X, Z))
         rhs = associator(Y, Z, X) ∘ braiding(X, Y ⊗ Z) ∘ associator(X, Y, Z)
@@ -154,7 +154,7 @@ function _hexagon_equations_with_symbolic_FR(mult::Array{Int,3}, one_vec::Vector
     _fill_braiding!(poly_C, r_vars, mult, H)
 
     eqs = elem_type(H)[]
-    Ss = simples(poly_C)
+    Ss = TensorCategories.simples(poly_C)
     for X in Ss, Y in Ss, Z in Ss
         lhs = (braiding(X, Y) ⊗ id(Z)) ∘ associator(Y, X, Z) ∘ (id(Y) ⊗ braiding(X, Z))
         rhs = associator(Y, Z, X) ∘ braiding(X, Y ⊗ Z) ∘ associator(X, Y, Z)

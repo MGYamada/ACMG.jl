@@ -34,15 +34,20 @@ end
     ]
     for fr_data in cases
         rules = fr_data.rules
+        @test fusion_rule(fr_data) == rules
         pent = pentagon_equations(rules)
         hex = hexagon_equations(rules)
         @test fr_data isa FRData
+        @test isconcretetype(eltype(fr_data.F_values))
+        @test eltype(fr_data.R_values) === eltype(fr_data.F_values)
+        @test eltype(fr_data.R_inverse_values) === eltype(fr_data.F_values)
         @test !hasproperty(fr_data, :F)
         @test !hasproperty(fr_data, :R)
         @test length(fr_data.F_values) == get_pentagon_system(rules.N, rules.rank)[3]
-        @test length(ACMG._fr_hexagon_values(fr_data)) == get_hexagon_fr_system(rules.N, rules.rank)[3]
-        @test all(iszero(_eval_tc_poly_at(eq, ACMG._fr_pentagon_values(fr_data))) for eq in pent)
-        @test all(iszero(_eval_tc_poly_at(eq, ACMG._fr_hexagon_values(fr_data))) for eq in hex)
+        @test fr_pentagon_values(fr_data) === F_values(fr_data)
+        @test length(fr_hexagon_values(fr_data)) == get_hexagon_fr_system(rules.N, rules.rank)[3]
+        @test all(iszero(_eval_tc_poly_at(eq, fr_pentagon_values(fr_data))) for eq in pent)
+        @test all(iszero(_eval_tc_poly_at(eq, fr_hexagon_values(fr_data))) for eq in hex)
     end
 end
 
@@ -52,6 +57,9 @@ end
     @test size(br.generators[1]) == (1, 1)
 
     fib = braid_representation(fibonacci_fr_data(), [:τ, :τ, :τ], :τ)
+    @test fib isa BraidRepresentation
+    @test eltype(fib.generators) <: Matrix
+    @test isconcretetype(eltype(fib.generators[1]))
     @test length(fib.generators) == 2
     @test size(fib.generators[1]) == (2, 2)
 
