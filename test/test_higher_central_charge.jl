@@ -18,8 +18,8 @@ using ACMG
 
         fib = fibonacci_modular_data()
         z20 = ACMG.zeta(fib.context)
-        # This is the convention currently encoded by fibonacci_modular_data().
-        @test central_charge(fib) == 2 * z20^7 - z20^3 + z20
+        @test fib.S^2 == one(fib.S)
+        @test central_charge(fib) == z20^7
 
         toric = toric_code_modular_data()
         @test central_charge(toric) == one(ACMG.field(toric))
