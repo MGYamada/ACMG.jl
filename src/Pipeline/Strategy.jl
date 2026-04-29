@@ -23,10 +23,10 @@ Return a coarse Phase 4 estimate from associator and braiding slot counts.
 function estimate_phase4_complexity(Nijk::Array{Int,3})
     r = size(Nijk, 1)
     nF = try
-        _, _, count = get_pentagon_system(Nijk, r)
-        count
+        _, _, n = get_pentagon_system(Nijk, r)
+        n
     catch
-        count(!iszero, Nijk)
+        Base.count(!iszero, Nijk)
     end
     nR = _forward_r_var_count(Nijk)
     score = max(1, nF) * max(1, nR)

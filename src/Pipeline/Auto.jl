@@ -45,14 +45,15 @@ This function is intended as the recommended public entry point for
 users who do not want to manually specify `max_rank` and `primes`. The
 effective conductor is fixed to the user-supplied `N`.
 
-For each previously unseen effective conductor, the driver tries
+The effective conductor is computed once, then the driver tries
 `(conductor_mode, max_rank)` combinations and records stage metadata.
-Since `N_effective = N`, duplicate stages are skipped. Search stops
+Since `N_effective = N`, there is only one executable stage. Search stops
 when any of:
 
-- no new MTCs for `stagnation_k` consecutive executed stages,
 - `N_eff_candidate > N_eff_max`,
 - total attempted runs reaches `max_attempts`.
+
+`stagnation_k` is retained as a compatibility keyword.
 
 Returns:
 
@@ -105,9 +106,7 @@ function classify_mtcs_auto(N::Int;
                  conductor_mode = :full_mtc, primes = Int[],
                  max_rank = 0, attempts = 0)
     attempts = 0
-    n_stagnant = 0
 
-    seen_stages = Set{Int}()
     seen_signatures = Set{String}()
     history = NamedTuple[]
 
@@ -117,23 +116,12 @@ function classify_mtcs_auto(N::Int;
         string(m.rank, "|", m.galois_sector, "|", nijk_key, "|", t_key)
     end
 
-    for _stage in 1:1
-        N_eff_candidate = compute_effective_conductor(N)
-        if N_eff_candidate > N_eff_max
-            push!(history, (N_effective = N_eff_candidate, executed = false,
-                            success = false, reason = "N_eff_max_exceeded",
-                            attempts = 0, new_mtcs = 0))
-            break
-        end
-        stage_key = N_eff_candidate
-        if stage_key in seen_stages
-            push!(history, (N_effective = N_eff_candidate, executed = false,
-                            success = false, reason = "duplicate_stage",
-                            attempts = 0, new_mtcs = 0))
-            continue
-        end
-        push!(seen_stages, stage_key)
-
+    N_eff_candidate = compute_effective_conductor(N)
+    if N_eff_candidate > N_eff_max
+        push!(history, (N_effective = N_eff_candidate, executed = false,
+                        success = false, reason = "N_eff_max_exceeded",
+                        attempts = 0, new_mtcs = 0))
+    else
         stage_attempts = 0
         stage_success = false
         stage_reason = "no_attempts"
@@ -221,14 +209,10 @@ function classify_mtcs_auto(N::Int;
             end
         end
 
-        n_stagnant = stage_new_mtcs == 0 ? n_stagnant + 1 : 0
         push!(history, (N_effective = N_eff_candidate, executed = true,
                         success = stage_success, reason = stage_reason,
                         attempts = stage_attempts, new_mtcs = stage_new_mtcs))
 
-        if n_stagnant >= stagnation_k || attempts >= max_attempts
-            break
-        end
     end
 
     return (classified = last_result,

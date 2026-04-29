@@ -64,7 +64,7 @@ function fibonacci_modular_data(ctx::CyclotomicContext = CyclotomicContext(20))
     K, z = ctx.field, ctx.zeta
     sqrt5 = _sqrt5(ctx)
     phi = (one(K) + sqrt5) // K(2)
-    invD = z + z^(-1) - z^3 - z^(-3)
+    invD = (z^3 - z^7) // sqrt5
     S = invD * matrix(K, 2, 2, [1, phi, phi, -1])
     T = matrix(K, 2, 2, [1, 0, 0, z^8])
     return ModularData(ctx, [:one, :tau], S, T, 20, 5, nothing)
