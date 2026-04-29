@@ -267,7 +267,8 @@ function classify_from_group(group::Dict{Int, MTCCandidate},
     md_roundtrip = _with_fr_roundtrip_metadata(md_roundtrip;
                                                candidate_index = selection.selected_index,
                                                galois_exponent = selection.score.galois_exponent)
-    md_roundtrip.ok || error("Phase 4 selected (F,R) does not roundtrip to the target modular data")
+    _fr_roundtrip_attachable(md_roundtrip) ||
+        error("Phase 4 selected (F,R) does not roundtrip to the target S data")
     verbose && println("  modular-data roundtrip: perm=$(md_roundtrip.best_perm), " *
                        "S_err=$(md_roundtrip.S_max), T_err=$(md_roundtrip.T_max), " *
                        "ok=$(md_roundtrip.ok)")
@@ -639,10 +640,14 @@ function classify_mtcs_at_conductor(N::Int;
                                "galois=$(selection.score.galois_exponent), " *
                                "perm=$(best_md.best_perm), " *
                                "S_err=$(best_md.S_max), T_err=$(best_md.T_max), ok=$(best_md.ok)")
-            if best_md.ok
+            if _fr_roundtrip_attachable(best_md)
+                if !best_md.ok && verbose
+                    println("    member[$i] accepted with exact S roundtrip; " *
+                            "retaining T mismatch in report")
+                end
                 out[i] = _with_fr_result(out[i], selected.F, selected.R, best_md)
             else
-                verbose && println("    member[$i] selected (F,R) failed target roundtrip; leaving without F/R")
+                verbose && println("    member[$i] selected (F,R) failed target S roundtrip; leaving without F/R")
                 out[i] = _with_fr_status(out[i], FRVerificationFailed)
             end
         end

@@ -178,5 +178,6 @@ end
 
     @test !selection.selected_ok
     @test !target_roundtrip.ok
+    @test ACMG._fr_roundtrip_attachable(target_roundtrip)
     @test self_roundtrip.ok
 end

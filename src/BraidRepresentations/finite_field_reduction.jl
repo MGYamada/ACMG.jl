@@ -1,11 +1,11 @@
-struct FiniteFieldBraidRepresentation
-    source::Any
+struct FiniteFieldBraidRepresentation{B}
+    source::B
     p::Int
     objects::Vector{Int}
     total::Int
     basis::FusionTreeBasis
     generators::Vector{Matrix{Int}}
-    metadata::Dict{Symbol, Any}
+    metadata::AbstractDict{Symbol}
 end
 
 function _reduce_scalar_mod_p(x, p::Int, zeta_Fp)
@@ -32,9 +32,11 @@ function reduce_mod_p(br::BraidRepresentation, p::Integer; conductor = nothing)
             error("F_$p does not contain a primitive $(conductor)-th root of unity; finite-field extensions are not implemented yet")
         zeta_Fp = find_zeta_in_Fp(Int(conductor), p)
     end
-    gens = [_reduce_matrix_mod_p(g, p, zeta_Fp) for g in br.generators]
-    return FiniteFieldBraidRepresentation(br, p, br.objects, br.total, br.basis, gens,
-        Dict(:p => p, :conductor => conductor, :p_mod_conductor => conductor === nothing ? nothing : mod(p, Int(conductor)),
+    gens = Matrix{Int}[_reduce_matrix_mod_p(g, p, zeta_Fp) for g in br.generators]
+    return FiniteFieldBraidRepresentation{typeof(br)}(
+        br, p, br.objects, br.total, br.basis, gens,
+        Dict(:p => p, :conductor => conductor,
+             :p_mod_conductor => conductor === nothing ? nothing : mod(p, Int(conductor)),
              :extension_field_required => false))
 end
 

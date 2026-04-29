@@ -65,6 +65,11 @@ end
                            parameters = params)
             gauge = Dict(ch => i + 2 for (i, ch) in enumerate(params))
             moved = apply_gauge_mod_p(symbol_data, gauge, p)
+            moved_typed = apply_gauge_mod_p(symbol_data,
+                                            GaugeParameters(Dict((a, b, c, 1) => v
+                                                                 for ((a, b, c), v) in gauge)),
+                                            p)
+            @test moved_typed.values == moved.values
             returned = apply_gauge_mod_p(moved,
                                          Dict(ch => invmod(v, p) for (ch, v) in gauge),
                                          p)

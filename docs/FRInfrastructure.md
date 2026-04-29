@@ -30,6 +30,40 @@ It is the public wrapper for `get_hexagon_fr_system`.
 H, hex, nvars = get_hexagon_fr_system(rules.N, rules.rank)
 ```
 
+## FRData accessor boundary
+
+`FRData{T}` now lives in `src/FR/FRData.jl` and is the shared container for
+F-symbols, R-symbols, fusion rules, object labels, and Hom-basis indices.
+Gauge and braid code should use the accessor boundary instead of reading
+F/R storage directly:
+
+```julia
+data = fibonacci_fr_data()
+
+simples(data)
+fusion_coeff(data, :τ, :τ, :one)
+fusion_channels(data, :τ, :τ)
+hom_basis(data, :τ, :τ, :τ)
+F_symbol(data, :τ, :τ, :τ, :τ; e = :one, f = :τ)
+R_symbol(data, :τ, :τ, :one)
+```
+
+Responsibility boundaries:
+
+- `src/FR/FRData.jl` owns F/R storage, object-label normalization,
+  Hom-basis indexing, TensorCategories vector order, and scalar accessors.
+- `src/BraidRepresentations` consumes `FRData` through `fusion_rule`,
+  `F_symbol`, `R_symbol`, and scalar-vector accessors to build braid matrices.
+- `src/Gauge` owns gauge parameters, gauge action, and gauge-fixing
+  validation.  `validate_frdata_for_gauge` deliberately lives in Gauge because
+  scalar gauge transforms are a stricter multiplicity-free layer on top of
+  otherwise valid FRData.
+
+The vector-backed constructor still uses TensorCategories variable order and
+currently requires multiplicity-free fusion rules.  Multiplicityful F/R tables
+can be attached later through `metadata[:F_symbols]` and
+`metadata[:R_symbols]` with explicit Hom-basis indices.
+
 The older `hexagon_equations(rules, F_values; context = ctx)` specialization
 has been retired as a public API.  The Phase-4 solver still uses
 `get_hexagon_system(Nijk, rank, F_values; context = ctx)` internally after

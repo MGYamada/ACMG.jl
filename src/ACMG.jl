@@ -68,9 +68,13 @@ include("FR/HexagonEquations.jl")
 include("FR/ExactPolynomialSolver.jl")
 include("FR/PentagonSolver.jl")
 include("FR/HexagonSolver.jl")
+include("FR/FRData.jl")
 include("Reconstruction/ModularDataLift.jl")
 
-# Gauge: public gauge API surface and gauge-fixing helpers.
+# Braid representations consume FRData from the FR layer.
+include("BraidRepresentations/BraidRepresentations.jl")
+
+# Gauge: public gauge API surface and gauge-fixing helpers over FRData accessors.
 include("Gauge/GaugeWeights.jl")
 include("Gauge/ToricGauge.jl")
 include("Gauge/FiniteFieldGauge.jl")
@@ -91,8 +95,7 @@ include("GaussSums/HigherCentralCharge.jl")
 # Experimental: finite-field F/R prototypes.
 include("Experimental/FiniteFieldHigherCentralCharge.jl")
 
-# Braid representations and experimental finite-field Zariski diagnostics.
-include("BraidRepresentations/BraidRepresentations.jl")
+# Experimental finite-field Zariski diagnostics.
 include("ZariskiDiagnostics/ZariskiDiagnostics.jl")
 
 # IO: JSON export/import and Markdown reports for classification outputs.
@@ -161,7 +164,8 @@ export get_hexagon_fr_system
 export number_of_variables_in_hexagon_equations
 export solve_hexagon_modular_crt, solve_hexagon_homotopy
 export DiscreteLogTable, lift_T_Fp_to_cyclotomic
-export GaugeTransform, canonical_gauge, gauge_equivalent, gauge_transform
+export GaugeTransform, GaugeParameters, GaugeChoice, GaugeFixingResult
+export canonical_gauge, gauge_equivalent, gauge_transform
 export gauge_fixing_plan, is_gauge_fixed
 export gauge_parameters, symbol_coordinates, f_symbol_weight, r_symbol_weight
 export gauge_weight_matrix, smith_gauge_split, ineffective_kernel_rank
@@ -173,6 +177,12 @@ export EquationVariable, EquationTerm, EquationExpr, PolynomialEquation, Equatio
 export GaugeVariable
 export FREquationSystem, FiniteFieldEquationSystem
 export simple_objects, fusion_product, fusion_channels, is_admissible
+export simples, fusion_coeff, hom_basis, F_symbol, R_symbol
+export has_F_symbol, has_R_symbol, gauge_basis_indices, validate_frdata_for_gauge
+export fusion_rule, F_values, R_values, R_inverse_values
+export fr_metadata, fr_scalar_type, fr_value_one, frdata_from_vectors
+export frdata_from_namedtuple
+export fr_pentagon_values, fr_hexagon_values
 export is_multiplicity_free
 export require_multiplicity_free
 export pentagon_equations

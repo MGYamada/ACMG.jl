@@ -20,6 +20,8 @@ function _gauge_value_mod_p(gauge_element, ch::GaugeParameter, idx::Int, p::Int)
         return mod(Int(get(gauge_element, ch, 1)), p)
     elseif gauge_element isa GaugeTransform
         return mod(Int(get(gauge_element.scalars, ch, 1)), p)
+    elseif gauge_element isa GaugeParameters
+        return mod(Int(get(gauge_element.values, (ch[1], ch[2], ch[3], 1), 1)), p)
     elseif gauge_element isa AbstractVector
         idx <= length(gauge_element) || error("gauge vector is shorter than the parameter list")
         return mod(Int(gauge_element[idx]), p)

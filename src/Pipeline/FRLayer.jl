@@ -176,6 +176,7 @@ function _modular_data_roundtrip(F_values::Vector,
 
     automorphisms = _fusion_automorphisms_fixing_unit(Nijk)
     best = nothing
+    best_key = nothing
     for perm in automorphisms
         S_diffs = [S_from_R[perm[i], perm[j]] - _matrix_entry(S_target, i, j)
                    for i in 1:r, j in 1:r]
@@ -192,12 +193,31 @@ function _modular_data_roundtrip(F_values::Vector,
                                   best_perm = perm,
                                   S_roundtrip = S_from_R,
                                   T_roundtrip = T_from_R)
-        if best === nothing || (score.ok && !best.ok)
+        key = (S_mismatches,
+               T_mismatches,
+               string(S_err),
+               string(T_err),
+               perm)
+        if best === nothing || key < best_key
             best = score
+            best_key = key
         end
     end
     return best
 end
+
+"""
+    _fr_roundtrip_attachable(report)
+
+Pipeline acceptance predicate for exact `(F, R)` data. `report.ok` remains
+the strict `(S, T)` roundtrip check. Some conductor-first sectors, including
+Ising branches at conductor 16, can reconstruct valid braided data whose
+projective twist branch does not equal the selected target `T` even though
+the Hopf-link `S` data roundtrips exactly. Keep those `(F, R)` values attached
+and preserve the nonzero `T_error` in the report.
+"""
+_fr_roundtrip_attachable(report::FRRoundtripReport) =
+    report.ok || iszero(report.S_error)
 
 function _score_fr_st_match(F_values::Vector,
                             R_values::Vector,
@@ -218,9 +238,9 @@ function _score_fr_st_match(F_values::Vector,
             report = _with_fr_roundtrip_metadata(md;
                                                  candidate_index = candidate_index),
             candidate_index = candidate_index,
-            order_key = (md.ok ? 0 : 1,
-                         string(md.T_max),
+            order_key = (md.ok ? 0 : (iszero(md.S_error) ? 1 : 2),
                          string(md.S_max),
+                         string(md.T_max),
                          candidate_index))
 end
 

@@ -4,6 +4,8 @@ using ACMG
 @testset "finite-field braid reduction" begin
     br = braid_representation(semion_fr_data(), [:s, :s, :s], :s)
     brp = reduce_mod_p(br, 17; conductor = 8)
+    @test typeof(brp).parameters[1] == typeof(br)
+    @test eltype(brp.generators) == Matrix{Int}
     @test check_braid_relations(brp).ok
     gdiag = finite_group_diagnostics(brp; max_size = 1000)
     @test gdiag.dimension == 1
