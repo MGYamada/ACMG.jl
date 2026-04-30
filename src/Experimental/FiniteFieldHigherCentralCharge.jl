@@ -124,17 +124,28 @@ end
 """
     solve_FR_mod_p(category_spec, p; compute_fr = category == :fibonacci)
 
+Experimental API.
+
 Construct a finite-field prototype F/R solution for a built-in category.
+
+Inputs are a built-in category name or `ModularData` object and a prime `p`.
+The output is an `FRSolutionModP` containing reduced S/T data and, when
+requested and available, reduced reference F/R coordinates.
 
 The current experimental path supports `:semion`, `:fibonacci`, `:ising`,
 and `:toric_code`.  It reduces exact cyclotomic S/T data to F_p and, when
 `compute_fr` is true, stores a reduced reference Phase-4 F/R solution.
 For higher central charges only the gauge-invariant reduced S/T data is used.
+
+Mathematical caveats: finite-field residues are computational evidence and
+are not by themselves a characteristic-zero reconstruction or uniqueness
+proof.  API inputs and outputs may change before v1.0.
 """
 function solve_FR_mod_p(category_spec, p::Integer;
                         compute_fr::Union{Bool, Nothing} = nothing,
                         primes::Vector{Int} = Int[],
                         kwargs...)
+    warn_experimental("solve_FR_mod_p")
     isempty(kwargs) || error("unsupported keyword arguments: $(collect(keys(kwargs)))")
     data = _builtin_data_for_finite_field(category_spec)
     sym = _category_symbol(category_spec isa ModularData ? data : category_spec)
@@ -238,12 +249,21 @@ higher_central_charges(solution::FRSolutionModP, ns;
 """
     lift_higher_central_charge(value_mod_p, cyclotomic_field_info)
 
+Experimental API.
+
 Placeholder for cyclotomic reconstruction from modular residues.
+
+Inputs are a finite-field residue and metadata describing the intended
+cyclotomic field.  The current output is the supplied residue.
 
 For now this returns the supplied residue unless `cyclotomic_field_info` is a
 `ModularData` object, in which case callers should compare by reducing the
 exact cyclotomic value with `reduce_mod_p`.
+
+Mathematical caveats: this helper does not prove a lift or perform complete
+cyclotomic reconstruction.  API inputs and outputs may change before v1.0.
 """
 function lift_higher_central_charge(value_mod_p, cyclotomic_field_info)
+    warn_experimental("lift_higher_central_charge")
     return value_mod_p
 end

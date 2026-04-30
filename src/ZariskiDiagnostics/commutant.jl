@@ -39,7 +39,21 @@ function _nullspace_mod_p(A::Matrix{Int}, p::Int)
     return basis
 end
 
+"""
+    commutant(sigmas, p)
+
+Experimental API.
+
+Compute the finite-field commutant of the matrices `sigmas` modulo `p`.
+The output is a `CommutantDiagnostics` record with a basis and an
+irreducibility heuristic.
+
+Mathematical caveats: the result is a finite-field diagnostic and not a full
+characteristic-zero representation-theoretic proof.  API inputs and outputs
+may change before v1.0.
+"""
 function commutant(sigmas::AbstractVector{<:AbstractMatrix{<:Integer}}, p::Int)
+    warn_experimental("commutant")
     isempty(sigmas) && error("commutant requires at least one generator")
     n = size(sigmas[1], 1)
     rows = Vector{Int}[]

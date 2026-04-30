@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.8.5 - API Stability Documentation and Experimental API Marking
+
+### Added
+- Added a Documenter-based docs tree under `docs/src/` with pages for getting
+  started, concepts, modular data, F/R symbols, gauge fixing, braid
+  representations, finite fields, Block-U search, Zariski diagnostics, API
+  stability, and API reference.
+- Added `docs/src/api_stability.md`, defining stable/public, experimental,
+  and internal API boundaries for pre-1.0 releases.
+- Added an experimental API list covering finite-field F/R prototypes,
+  cyclotomic reconstruction hooks, finite-field braid diagnostics, Zariski
+  diagnostics, gauge-fixing internals, and low-level Block-U search helpers.
+- Added `warn_experimental(name)` as an opt-in warning helper.  Warnings are
+  emitted only when `ENV["ACMG_WARN_EXPERIMENTAL"] == "true"` and are
+  de-duplicated per API name.
+- Added GitHub Actions CI with separate test and docs build jobs.
+- Added tests for API stability docs existence, experimental warning behavior,
+  and documented experimental symbol availability.
+
+### Changed
+- Reorganized legacy docs pages into the new `docs/src/` structure.
+- Updated README with the v0.8.5 research focus, API stability policy link,
+  and experimental API warning.
+- Added "Experimental API" docstrings and mathematical caveats to selected
+  exported experimental functions without changing their behavior.
+- Classified potentially internal exported helpers in docs/TODO comments
+  instead of removing exports, preserving v0.8 compatibility.
+
+### Removed
+- Removed legacy top-level docs pages after folding their content into the new
+  docs tree: `docs/BraidRepresentations.md`, `docs/FRInfrastructure.md`, and
+  `docs/HigherCentralCharges.md`.
+
+### Tests
+- Verified the full test suite with
+  `julia --project=. -e 'using Pkg; Pkg.test()'`.
+- Verified docs build with `julia --project=docs docs/make.jl`.
+
 ## v0.8.4 - Block-U Refactor and Strict Phase 4 Roundtrips
 
 ### Changed

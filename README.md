@@ -1,9 +1,21 @@
 # ACMG — Arithmetic Condensed Matter Geometry
 
-ACMG.jl is a conductor-first experimental library for modular tensor
-category arithmetic.  The base field is chosen up front as `Q(ζ_N)`,
-and modular data, Galois action, Frobenius, and finite-field reduction
-all keep that same conductor context.
+ACMG.jl is a research-oriented computational framework for arithmetic
+condensed matter geometry and modular tensor category experiments.  It is a
+conductor-first library: the base field is chosen up front as `Q(ζ_N)`, and
+modular data, Galois action, Frobenius, and finite-field reduction all keep
+that same conductor context.
+
+As of v0.8.5 the current focus is exact modular data, Galois actions, higher
+central charges, F/R symbols, gauge fixing, braid representations, and
+finite-field experiments.
+
+ACMG.jl is pre-1.0 research software.  The documented public API is intended
+for normal use, while finite-field F/R solving, reconstruction, gauge internals,
+Zariski diagnostics, generated subgroup diagnostics, and low-level search
+helpers are experimental and may change before v1.0.  See the
+[API stability policy](docs/src/api_stability.md), and pin the package version
+when depending on experimental APIs.
 
 ```julia
 using ACMG
@@ -133,7 +145,7 @@ fp_system = reduce_mod_p(fixed, 11)
 This layer generates F-symbol variables, R-symbol variables, pentagon
 equations, left/right hexagon equations, safe unit-channel gauge fixing,
 and finite-field reductions without requiring a solver backend at the
-representation boundary.  See `docs/FRInfrastructure.md`.
+representation boundary.  See `docs/src/fr_symbols.md`.
 
 `ClassifiedMTC` records carry an explicit `fr_status` field.  Use
 `fr_status(m)` to distinguish skipped, solved, reconstruction-failed, and

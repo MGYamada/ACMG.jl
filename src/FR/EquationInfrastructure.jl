@@ -378,11 +378,44 @@ function reduce_mod_p(system::FREquationSystem, p::Integer)
     return FiniteFieldEquationSystem(system, pp, copy(system.variables), eqs, meta)
 end
 
+"""
+    solve_finite_field(system::FiniteFieldEquationSystem; kwargs...)
+
+Experimental API.
+
+Attempt to solve a reduced F/R equation system over a finite field.
+
+The input is a `FiniteFieldEquationSystem`, normally produced by
+`reduce_mod_p(::FREquationSystem, p)`.  A future implementation may return
+finite-field solution records; v0.8.5 only validates the interface and reports
+that the general solver is not implemented.
+
+Mathematical caveats: finite-field solutions require lifting and exact
+verification before they should be treated as cyclotomic F/R data.  API inputs
+and outputs may change before v1.0.
+"""
 function solve_finite_field(system::FiniteFieldEquationSystem; kwargs...)
+    warn_experimental("solve_finite_field")
     error("solve_finite_field is not implemented for general FR systems; v0.8 only provides reduction infrastructure")
 end
 
+"""
+    cyclotomic_reconstruct(fp_solution; conductor::Integer)
+
+Experimental API.
+
+Reconstruct cyclotomic data from finite-field solution data.
+
+The input is a finite-field solution-like object and a positive conductor.
+The intended output is a cyclotomic lift, but v0.8.5 only validates the
+conductor and reports that the reconstruction backend is incomplete.
+
+Mathematical caveats: modular residues are not a proof of a cyclotomic lift
+without CRT bounds and exact equation verification.  API inputs and outputs
+may change before v1.0.
+"""
 function cyclotomic_reconstruct(fp_solution; conductor::Integer)
+    warn_experimental("cyclotomic_reconstruct")
     conductor > 0 || error("conductor must be positive")
     error("cyclotomic_reconstruct is experimental and not implemented beyond interface validation")
 end
