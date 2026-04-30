@@ -36,6 +36,7 @@ using Primes
 # Core: shared types and finite-field arithmetic.
 include("Core/Types.jl")
 include("Core/FpArith.jl")
+include("Core/ExperimentalWarnings.jl")
 
 # Cyclotomics: exact cyclotomic context, reduction, and Galois actions.
 include("Cyclotomics/Context.jl")
@@ -127,6 +128,7 @@ export modular_data_automorphisms, is_modular_data_automorphism
 export galois_anyon_action, galois_anyon_orbits
 export extract_fusion_rule_Fp, lift_fusion_to_Z, extract_and_lift
 export verlinde_coefficient
+export warn_experimental
 export is_square, sqrt_mod, primitive_root, root_of_unity, roots_of_unity
 export matmul_mod, matpow_mod, diagmul_right, diagmul_left, lift_symmetric
 export fusion_isomorphic, fusion_matrix, validate
@@ -138,6 +140,8 @@ export AtomicIrrep, build_atomic_catalog, all_divisors
 export Stratum, enumerate_strata, count_strata, describe_stratum, find_unit_indices
 
 # Phase 2: block-U
+# TODO(v1.0): classify low-level block-U/search helpers below as
+# experimental/internal in docs before removing or narrowing any exports.
 export MTCCandidate, build_block_diagonal, reduce_matrix_to_Fp, reduce_vector_to_Fp
 export find_zeta_in_Fp, cyclotomic_to_Fp
 export t_eigenspace_decomposition, parameter_dim
@@ -195,6 +199,8 @@ export FusionPath, FusionTreeBasis, FRData, BraidRepresentation, FiniteFieldBrai
 export MatrixAlgebraDiagnostics, CommutantDiagnostics, ZariskiClosureDiagnostics
 export fusion_basis, fusion_paths, dim
 export braid_representation, braid_generator, braid_generators
+# TODO(v1.0): diagnostics exports are kept for compatibility in v0.8.5 but
+# documented as experimental computational evidence rather than stable proofs.
 export check_braid_relations, finite_group_diagnostics, generated_subgroup
 export generated_matrix_algebra, commutant, zariski_closure_diagnostics
 export semion_fr_data, fibonacci_fr_data, ising_fr_data

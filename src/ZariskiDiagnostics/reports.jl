@@ -12,7 +12,22 @@ struct ZariskiClosureDiagnostics
     notes::Vector{String}
 end
 
+"""
+    zariski_closure_diagnostics(br; max_words = 200, max_degree = 2)
+
+Experimental API.
+
+Collect finite-field diagnostics that are suggestive of the braid image's
+Zariski behavior.  The input is a `FiniteFieldBraidRepresentation`; the output
+is a `ZariskiClosureDiagnostics` record containing matrix-algebra,
+commutant, determinant, projective-order, and note fields.
+
+Mathematical caveats: this function does not compute a full Zariski closure
+or classify algebraic groups.  Treat diagnostics as computational evidence,
+not as mathematical theorems.  API inputs and outputs may change before v1.0.
+"""
 function zariski_closure_diagnostics(br::FiniteFieldBraidRepresentation; max_words = 200, max_degree = 2)
+    warn_experimental("zariski_closure_diagnostics")
     alg = generated_matrix_algebra(br)
     comm = commutant(br)
     gdiag = finite_group_diagnostics(br; max_size = max(1000, max_words))

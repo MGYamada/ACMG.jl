@@ -23,4 +23,5 @@ using Test
     include("braid_relations.jl")
     include("finite_field_braid.jl")
     include("zariski_diagnostics.jl")
+    include("test_api_stability_docs.jl")
 end
